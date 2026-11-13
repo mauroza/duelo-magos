@@ -28,7 +28,7 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping" --health-interval 2s --health-retries 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
@@ -51,7 +51,7 @@ jobs:
     name: Escaneo de dependencias y secretos
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
@@ -67,7 +67,7 @@ jobs:
     name: Imagen de contenedor
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Construir
         run: docker build -t duelo-magos:ci .
       - name: Corre como usuario no root
@@ -81,7 +81,7 @@ jobs:
     name: Validar infraestructura (Bicep)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: az bicep install
       - name: Compilar plantillas (los errores se muestran como anotaciones)
         run: |

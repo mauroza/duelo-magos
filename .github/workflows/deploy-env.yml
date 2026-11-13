@@ -23,7 +23,7 @@ jobs:
       ENV_HOST_RG: ${{ inputs.env == 'prod' && 'rg-duelo-magos-dev' || '' }}
       LOCATION: ${{ vars.AZURE_LOCATION || 'canadacentral' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Iniciar sesión en Azure (OIDC, sin secretos)
         uses: azure/login@v2
