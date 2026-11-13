@@ -136,7 +136,7 @@ export class GameClient {
   }
 
   private onMessage(msg: ServerMsg): void {
-    if (this.opts.keepLog !== false) this.received.push(msg);
+    if (this.opts.keepLog !== false || msg.type === "match.update") this.received.push(msg);
     if (msg.type === 'match.sync') {
       const p = msg.payload as { matchId: string; seq: number; view: View };
       this.views.set(p.matchId, p.view);

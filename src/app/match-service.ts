@@ -2,6 +2,7 @@ import { randomInt, randomUUID } from 'node:crypto';
 import type { Logger } from 'pino';
 import {
   createMatch,
+  DomainError,
   join as domainJoin,
   leave as domainLeave,
   nextDeadline,
@@ -59,6 +60,11 @@ interface MutateOptions {
   /** Trabajo adicional dentro de la misma transacción (membresías, idempotencia). */
   readonly before?: (tx: Tx, row: MatchRow) => Promise<void>;
   readonly after?: (tx: Tx, t: Transition, firstSeq: number) => Promise<void>;
+  /**
+   * Ruta rápida de las jugadas: la comprobación de idempotencia viaja en el mismo SELECT ... FOR UPDATE
+   * y el registro de la jugada en la misma sentencia de escritura (4 viajes a la base en vez de 7).
+   */
+  readonly move?: { readonly userId: string; readonly clientMoveId: string; readonly round: number; readonly action: Action };
 }
 
 const INVITE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -174,31 +180,13 @@ export class MatchService {
     action: Action,
     receivedAt = this.now(),
   ): Promise<{ duplicate: boolean; seq: number }> {
-    let duplicateSeq: number | null = null;
-    const result = await this.mutate(
-      matchId,
-      (s) => (duplicateSeq !== null ? null : domainSubmit(s, userId, round, action, this.now())),
-      {
-        receivedAt,
-        before: async (tx) => {
-          const { rows } = await tx.query<{ seq: number }>(
-            'SELECT seq FROM match_actions WHERE match_id = $1 AND user_id = $2 AND client_move_id = $3',
-            [matchId, userId, clientMoveId],
-          );
-          if (rows[0]) duplicateSeq = rows[0].seq;
-        },
-        after: async (tx, _t, firstSeq) => {
-          await tx.query(
-            `INSERT INTO match_actions (match_id, user_id, client_move_id, round, action, seq)
-             VALUES ($1, $2, $3, $4, $5, $6)`,
-            [matchId, userId, clientMoveId, round, action, firstSeq],
-          );
-        },
-      },
-    );
-    if (duplicateSeq !== null) {
+    const result = await this.mutate(matchId, (s) => domainSubmit(s, userId, round, action, this.now()), {
+      receivedAt,
+      move: { userId, clientMoveId, round, action },
+    });
+    if (result.duplicateSeq !== null) {
       gameMetrics.actions.add(1, { result: 'duplicate' });
-      return { duplicate: true, seq: duplicateSeq };
+      return { duplicate: true, seq: result.duplicateSeq };
     }
     gameMetrics.actions.add(1, { result: 'accepted' });
     gameMetrics.actionLatency.record(this.now() - receivedAt);
@@ -380,35 +368,48 @@ export class MatchService {
     matchId: string,
     fn: (state: MatchState) => Transition | null,
     opts: MutateOptions = {},
-  ): Promise<{ state: MatchState; version: number }> {
+  ): Promise<{ state: MatchState; version: number; duplicateSeq: number | null }> {
     const outcome = await withTx(this.db, async (tx) => {
-      const { rows } = await tx.query<MatchRow>(
-        `SELECT id, state, version, status, visibility, invite_code FROM matches WHERE id = $1 FOR UPDATE${
-          opts.skipLocked ? ' SKIP LOCKED' : ''
-        }`,
-        [matchId],
+      const params: unknown[] = [matchId];
+      let dupSql = 'NULL::int';
+      if (opts.move) {
+        params.push(opts.move.userId, opts.move.clientMoveId);
+        dupSql = '(SELECT a.seq FROM match_actions a WHERE a.match_id = m.id AND a.user_id = $2 AND a.client_move_id = $3)';
+      }
+      const { rows } = await tx.query<MatchRow & { dup_seq: number | null }>(
+        `SELECT m.id, m.state, m.version, m.status, m.visibility, m.invite_code, ${dupSql} AS dup_seq
+         FROM matches m WHERE m.id = $1 FOR UPDATE OF m${opts.skipLocked ? ' SKIP LOCKED' : ''}`,
+        params,
       );
       const row = rows[0];
       if (!row) {
         if (opts.skipLocked) return null;
         throw new AppError(404, 'NOT_FOUND', 'La partida no existe');
       }
+      if (row.dup_seq !== null) return { state: row.state, version: row.version, update: null, duplicateSeq: row.dup_seq };
       await opts.before?.(tx, row);
-      const t = fn(row.state);
+      let t: Transition | null;
+      try {
+        t = fn(row.state);
+      } catch (err) {
+        // Reenvíos simultáneos: el SELECT esperó el bloqueo con una foto anterior. Una consulta nueva
+        // ve la jugada ya confirmada y responde como duplicada (idempotente) en vez de ALREADY_ACTED.
+        if (opts.move && err instanceof DomainError && err.code === 'ALREADY_ACTED') {
+          const dup = await tx.query<{ seq: number }>(
+            'SELECT seq FROM match_actions WHERE match_id = $1 AND user_id = $2 AND client_move_id = $3',
+            [matchId, opts.move.userId, opts.move.clientMoveId],
+          );
+          if (dup.rows[0]) return { state: row.state, version: row.version, update: null, duplicateSeq: dup.rows[0].seq };
+        }
+        throw err;
+      }
       if (!t || (t.events.length === 0 && t.state === row.state)) {
-        return { state: row.state, version: row.version, update: null };
+        return { state: row.state, version: row.version, update: null, duplicateSeq: null };
       }
       const firstSeq = row.version + 1;
       const version = row.version + t.events.length;
-      await this.insertEvents(tx, matchId, firstSeq, t.events);
       const ended = t.state.status === 'finished' || t.state.status === 'aborted';
-      await tx.query(
-        `UPDATE matches SET state = $2, status = $3, version = $4, deadline = to_timestamp($5 / 1000.0),
-           result = $6, updated_at = now(), finished_at = CASE WHEN $7 THEN now() ELSE finished_at END
-         WHERE id = $1`,
-        [matchId, t.state, t.state.status, version, nextDeadline(t.state), t.state.result, ended],
-      );
-      if (ended) await tx.query('DELETE FROM active_membership WHERE match_id = $1', [matchId]);
+      await this.writeTransition(tx, matchId, t, firstSeq, version, ended, opts.move);
       await opts.after?.(tx, t, firstSeq);
       const update: MatchUpdate = {
         matchId,
@@ -418,9 +419,9 @@ export class MatchService {
         ...(this.broadcastMode === 'full' ? { state: t.state } : {}),
         ...(opts.receivedAt ? { receivedAt: opts.receivedAt } : {}),
       };
-      return { state: t.state, version, update };
+      return { state: t.state, version, update, duplicateSeq: null };
     });
-    if (!outcome) return this.getState(matchId);
+    if (!outcome) return { ...(await this.getState(matchId)), duplicateSeq: null };
     if (outcome.update) {
       this.observe(outcome.update);
       // Si la difusión falla, los clientes se resincronizan por número de secuencia al reconectar.
@@ -428,7 +429,45 @@ export class MatchService {
         this.log.error({ err, matchId }, 'no se pudo difundir la actualización');
       });
     }
-    return { state: outcome.state, version: outcome.version };
+    return { state: outcome.state, version: outcome.version, duplicateSeq: outcome.duplicateSeq };
+  }
+
+  /**
+   * Una sola sentencia (CTE con escrituras) guarda eventos, la jugada, el nuevo estado y libera
+   * las membresías si la partida terminó. Todo dentro de la transacción que tiene la fila bloqueada.
+   */
+  private async writeTransition(
+    tx: Tx,
+    matchId: string,
+    t: Transition,
+    firstSeq: number,
+    version: number,
+    ended: boolean,
+    move?: MutateOptions['move'],
+  ): Promise<void> {
+    const values: unknown[] = [matchId, t.state, t.state.status, version, nextDeadline(t.state), t.state.result, ended];
+    const p = (v: unknown): string => {
+      values.push(v);
+      return `$${values.length}`;
+    };
+    const ctes: string[] = [];
+    if (t.events.length > 0) {
+      const tuples = t.events.map((e, i) => `($1, ${p(firstSeq + i)}::int, ${p(e.type)}, ${p(e.to)}, ${p(e)}::jsonb)`);
+      ctes.push(`ev AS (INSERT INTO match_events (match_id, seq, type, recipient, payload) VALUES ${tuples.join(', ')})`);
+    }
+    if (move) {
+      ctes.push(
+        `act AS (INSERT INTO match_actions (match_id, user_id, client_move_id, round, action, seq) VALUES ($1, ${p(move.userId)}::uuid, ${p(move.clientMoveId)}::uuid, ${p(move.round)}::int, ${p(move.action)}::jsonb, ${p(firstSeq)}::int))`,
+      );
+    }
+    ctes.push('mem AS (DELETE FROM active_membership WHERE match_id = $1 AND $7::boolean)');
+    await tx.query(
+      `WITH ${ctes.join(', ')}
+       UPDATE matches SET state = $2, status = $3, version = $4, deadline = to_timestamp($5 / 1000.0),
+         result = $6, updated_at = now(), finished_at = CASE WHEN $7 THEN now() ELSE finished_at END
+       WHERE id = $1`,
+      values,
+    );
   }
 
   private observe(update: MatchUpdate): void {

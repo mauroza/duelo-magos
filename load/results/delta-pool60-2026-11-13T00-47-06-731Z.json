@@ -1,0 +1,61 @@
+{
+  "url": "http://localhost:8080",
+  "rounds": 6,
+  "label": "delta-pool60",
+  "results": [
+    {
+      "matches": 100,
+      "connections": 200,
+      "rounds": 519,
+      "p50": 72,
+      "p95": 116,
+      "p99": 127,
+      "max": 135,
+      "errors": 0,
+      "errorRate": 0,
+      "lost": 0,
+      "duplicated": 0,
+      "bytesPerUpdate": 356,
+      "cpuPct": 65,
+      "rssMb": 158,
+      "rssPerMatchKb": 174,
+      "durationS": 0.872
+    },
+    {
+      "matches": 200,
+      "connections": 400,
+      "rounds": 1013,
+      "p50": 133,
+      "p95": 166,
+      "p99": 181,
+      "max": 212,
+      "errors": 0,
+      "errorRate": 0,
+      "lost": 0,
+      "duplicated": 0,
+      "bytesPerUpdate": 357,
+      "cpuPct": 65,
+      "rssMb": 186,
+      "rssPerMatchKb": 230,
+      "durationS": 1.395
+    },
+    {
+      "matches": 300,
+      "connections": 600,
+      "rounds": 1524,
+      "p50": 213,
+      "p95": 302,
+      "p99": 324,
+      "max": 343,
+      "errors": 0,
+      "errorRate": 0,
+      "lost": 0,
+      "duplicated": 0,
+      "bytesPerUpdate": 357,
+      "cpuPct": 61,
+      "rssMb": 199,
+      "rssPerMatchKb": 198,
+      "durationS": 2.317
+    }
+  ]
+}
