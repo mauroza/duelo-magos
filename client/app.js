@@ -161,6 +161,7 @@ function onUpdate({ matchId, fromSeq, toSeq, events }) {
         v.round = e.round + 1;
         v.roundDeadline = e.nextDeadline;
         st.target = null;
+        st.animate = e.outcomes;
         break;
       case 'player.presence': {
         const p = v.players.find((x) => x.id === e.playerId);
@@ -183,6 +184,11 @@ function onUpdate({ matchId, fromSeq, toSeq, events }) {
     }
   }
   renderGame();
+  if (st.animate) {
+    const outcomes = st.animate;
+    st.animate = null;
+    playRound(outcomes);
+  }
 }
 
 // ───────────── vistas ─────────────
@@ -246,19 +252,27 @@ function renderGame() {
   $('round').textContent = v.status === 'lobby' ? 'sala' : v.round;
   $('code').textContent = st.code ? `Código: ${st.code}` : '';
   $('players').innerHTML = '';
-  for (const p of v.players) {
+  v.players.forEach((p, i) => {
     const el = document.createElement('div');
     const targetable = v.status === 'active' && me?.alive && p.alive && p.id !== me.id && !v.you?.pendingAction;
-    el.className = `mage${p.id === me?.id ? ' me' : ''}${p.alive ? '' : ' dead'}${targetable ? ' targetable' : ''}${st.target === p.id ? ' target' : ''}`;
     const winner = v.result?.winners?.includes(p.id);
-    const status = v.status === 'finished' || v.status === 'aborted' ? (winner ? '<span class="badge ok">🏆 ganador</span>' : p.alive ? '' : '<span class="badge">☠</span>') : v.status === 'lobby' ? (p.ready ? '<span class="badge ok">listo</span>' : '<span class="badge">esperando</span>') : !p.alive ? '<span class="badge">☠</span>' : p.hasActed ? '<span class="badge ok">eligió</span>' : '<span class="badge">pensando…</span>';
-    const aff = v.affinities?.[p.id] ? ` ${EMOJI[v.affinities[p.id]]}` : '';
-    el.innerHTML = `<div class="name"><span>${esc(p.name)}${p.id === me?.id ? ' (tú)' : ''}${aff}${p.connected ? '' : ' ⚡'}</span>${status}</div>
-      <div class="bar hp"><div style="width:${(p.hp / 12) * 100}%"></div></div><div class="stat"><span>Vida</span><span>${p.hp}</span></div>
-      <div class="bar mana"><div style="width:${(p.mana / (v.config?.maxMana ?? 6)) * 100}%"></div></div><div class="stat"><span>Maná</span><span>${p.mana}</span></div>`;
+    el.className = `mage${p.id === me?.id ? ' me' : ''}${p.alive ? '' : ' dead'}${targetable ? ' targetable' : ''}${st.target === p.id ? ' target' : ''}${winner ? ' winner' : ''}`;
+    el.dataset.id = p.id;
+    const ended = v.status === 'finished' || v.status === 'aborted';
+    const bubble = ended ? (winner ? '🏆' : '') : v.status === 'lobby' ? (p.ready ? '✓' : '…') : !p.alive ? '' : p.hasActed ? '✓' : '…';
+    const aff = v.affinities?.[p.id] ? `<span class="aff ${v.affinities[p.id]}">${EMOJI[v.affinities[p.id]]}</span>` : '';
+    el.innerHTML = `
+      <div class="bubble${bubble === '✓' || bubble === '🏆' ? ' ok' : ''}"${bubble ? '' : ' hidden'}>${bubble}</div>
+      <div class="avatar">${mageSVG(i, p.alive)}${aff}</div>
+      <div class="plate">
+        <div class="name">${esc(p.name)}${p.id === me?.id ? ' <span class="you">tú</span>' : ''}${p.connected ? '' : ' <span title="desconectado">⚡</span>'}</div>
+        <div class="bar hp"><div style="width:${(p.hp / 12) * 100}%"></div></div>
+        <div class="stat"><span>❤ ${p.hp}</span><span>✦ ${p.mana}</span></div>
+        <div class="bar mana"><div style="width:${(p.mana / (v.config?.maxMana ?? 6)) * 100}%"></div></div>
+      </div>`;
     if (targetable) el.onclick = () => { st.target = p.id; renderGame(); };
     $('players').append(el);
-  }
+  });
   $('lobbyActions').hidden = v.status !== 'lobby';
   $('ready').textContent = me?.ready ? 'Ya no estoy listo' : 'Estoy listo';
   const playing = v.status === 'active' && me?.alive;
@@ -326,6 +340,108 @@ function log(html) {
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+
+// ───────────── arte: magos como esferas con sombrero (SVG) ─────────────
+const PALETTE = [
+  { body: '#a259ff', light: '#d7b4ff', dark: '#5b1fb5', hat: '#4b1d8f', hatLight: '#7a3fd1' },
+  { body: '#22c7b8', light: '#a7f3ea', dark: '#0b6f68', hat: '#1d4f8f', hatLight: '#3b78c9' },
+  { body: '#ff8a3d', light: '#ffd0a8', dark: '#b2470b', hat: '#8f1d3b', hatLight: '#c93b62' },
+  { body: '#ff5fa2', light: '#ffc2dc', dark: '#a8155a', hat: '#3b1d8f', hatLight: '#6a45d6' },
+];
+
+function mageSVG(i, alive) {
+  const c = PALETTE[i % PALETTE.length];
+  const id = `m${i}`;
+  return `<svg viewBox="0 0 140 160" class="mage-svg" aria-hidden="true">
+    <defs>
+      <radialGradient id="${id}b" cx="38%" cy="32%" r="70%">
+        <stop offset="0" stop-color="${c.light}"/><stop offset=".45" stop-color="${c.body}"/><stop offset="1" stop-color="${c.dark}"/>
+      </radialGradient>
+      <linearGradient id="${id}h" x1="0" x2="1" y1="0" y2="1">
+        <stop offset="0" stop-color="${c.hatLight}"/><stop offset="1" stop-color="${c.hat}"/>
+      </linearGradient>
+      <linearGradient id="${id}g" x1="0" x2="0" y1="0" y2="1">
+        <stop offset="0" stop-color="#ffe08a"/><stop offset="1" stop-color="#d99a1e"/>
+      </linearGradient>
+    </defs>
+    <ellipse class="shadow" cx="70" cy="150" rx="40" ry="7" fill="#000" opacity=".45"/>
+    <g class="body">
+      <circle cx="70" cy="104" r="44" fill="url(#${id}b)"/>
+      <ellipse cx="54" cy="86" rx="12" ry="7" fill="#fff" opacity=".28" transform="rotate(-30 54 86)"/>
+      ${alive ? `<g class="eyes"><ellipse cx="57" cy="108" rx="4.5" ry="6" fill="#1a1030"/><ellipse cx="83" cy="108" rx="4.5" ry="6" fill="#1a1030"/>
+        <circle cx="58.5" cy="105.5" r="1.6" fill="#fff"/><circle cx="84.5" cy="105.5" r="1.6" fill="#fff"/></g>`
+        : `<g stroke="#1a1030" stroke-width="3" stroke-linecap="round"><path d="M52 103l9 9M61 103l-9 9M78 103l9 9M87 103l-9 9"/></g>`}
+    </g>
+    <g class="hat">
+      <ellipse cx="70" cy="66" rx="60" ry="13" fill="url(#${id}h)"/>
+      <path d="M38 64 C46 40 58 18 82 6 C92 1 104 4 110 14 C100 10 92 14 90 22 C88 36 96 52 102 64 Z" fill="url(#${id}h)"/>
+      <path d="M38 64 C40 57 42 52 44 48 L98 48 C99 53 101 58 102 64 C80 70 60 70 38 64 Z" fill="url(#${id}g)"/>
+      <path d="M68 30a9 9 0 1 0 9 -11a7 7 0 1 1 -9 11z" fill="#ffd45e"/>
+      <path d="M56 40l1.6 3.4 3.7.4-2.8 2.5.8 3.7-3.3-1.9-3.3 1.9.8-3.7-2.8-2.5 3.7-.4z" fill="#ffd45e"/>
+      <path d="M88 32l1.2 2.6 2.8.3-2.1 1.9.6 2.8-2.5-1.4-2.5 1.4.6-2.8-2.1-1.9 2.8-.3z" fill="#ffd45e"/>
+      <path d="M82 14l1 2.1 2.3.3-1.7 1.5.5 2.3-2.1-1.2-2.1 1.2.5-2.3-1.7-1.5 2.3-.3z" fill="#ffd45e"/>
+    </g>
+  </svg>`;
+}
+
+const ELEMENT_COLOR = { fuego: '#ff7a45', agua: '#4cc3ff', tierra: '#c9a46b' };
+
+function center(el) {
+  const r = el.getBoundingClientRect();
+  return { x: r.left + r.width / 2 + window.scrollX, y: r.top + r.height * 0.55 + window.scrollY };
+}
+
+/** Anima la ronda resuelta: hechizos que vuelan, escudos, maná y daño flotante. */
+function playRound(outcomes) {
+  const node = (id) => document.querySelector(`.mage[data-id="${id}"]`);
+  for (const o of outcomes) {
+    const from = node(o.playerId);
+    if (!from) continue;
+    if (o.action.kind === 'shield') {
+      const s = document.createElement('div');
+      s.className = 'shield-fx';
+      from.querySelector('.avatar').append(s);
+      setTimeout(() => s.remove(), 1600);
+    } else if (o.action.kind === 'channel') {
+      for (let k = 0; k < 7; k++) {
+        const sp = document.createElement('span');
+        sp.className = 'spark';
+        sp.style.left = `${20 + Math.random() * 60}%`;
+        sp.style.animationDelay = `${Math.random() * 0.4}s`;
+        from.querySelector('.avatar').append(sp);
+        setTimeout(() => sp.remove(), 1500);
+      }
+    } else if (o.action.kind === 'attack') {
+      const to = node(o.action.target);
+      if (!to) continue;
+      const a = center(from), b = center(to);
+      const orb = document.createElement('div');
+      orb.className = `orb ${o.action.element}`;
+      orb.style.left = `${a.x}px`;
+      orb.style.top = `${a.y}px`;
+      document.body.append(orb);
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        orb.style.transform = `translate(${b.x - a.x}px, ${b.y - a.y}px) scale(1.3)`;
+      }));
+      setTimeout(() => {
+        orb.classList.add('burst');
+        to.classList.add('hit');
+        setTimeout(() => { orb.remove(); to.classList.remove('hit'); }, 450);
+      }, 650);
+    }
+  }
+  setTimeout(() => {
+    for (const o of outcomes) {
+      const el = node(o.playerId);
+      if (!el || !o.damageTaken) continue;
+      const d = document.createElement('div');
+      d.className = 'dmg';
+      d.textContent = `-${o.damageTaken}`;
+      el.querySelector('.avatar').append(d);
+      setTimeout(() => d.remove(), 1300);
+    }
+  }, 700);
 }
 
 function alertError(e) {
