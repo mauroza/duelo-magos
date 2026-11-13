@@ -8,6 +8,10 @@ param location string = resourceGroup().location
 @description('Object ID de la identidad que despliega (GitHub Actions); recibe permiso para escribir el secreto JWT.')
 param deployerPrincipalId string
 param prefix string = 'duelo'
+@description('Grupo de recursos que ya tiene el entorno de Container Apps a compartir (vacío = crear uno propio). Azure for Students permite solo 1 entorno por región.')
+param envHostResourceGroup string = ''
+
+var createEnv = empty(envHostResourceGroup)
 
 var suffix = uniqueString(resourceGroup().id)
 var tags = { app: 'duelo-magos', env: env }
@@ -118,7 +122,7 @@ module pgAdmin 'modules/pg-admin.bicep' = {
 // ───────────── red privada del entorno ─────────────
 // Redis corre dentro de esta VNet (ingreso TCP interno): no es accesible desde Internet.
 // (Azure Managed Redis Balanced_B0 no tenía capacidad en esta región: ver ADR-7.)
-resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
+resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = if (createEnv) {
   name: 'vnet-${prefix}-${env}'
   location: location
   tags: tags
@@ -185,7 +189,7 @@ resource appTelemetry 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
 }
 
 // ───────────── entorno de Container Apps ─────────────
-resource caEnv 'Microsoft.App/managedEnvironments@2024-03-01' = {
+resource caEnv 'Microsoft.App/managedEnvironments@2024-03-01' = if (createEnv) {
   name: 'cae-${prefix}-${env}-vnet'
   location: location
   tags: tags
@@ -214,5 +218,12 @@ output pgHost string = pg.properties.fullyQualifiedDomainName
 output appInsightsConnectionString string = appInsights.properties.ConnectionString
 output appInsightsId string = appInsights.id
 output logAnalyticsId string = logs.id
-output caEnvId string = caEnv.id
-output caEnvDomain string = caEnv.properties.defaultDomain
+// prod comparte el entorno (cómputo y red) de dev; cada ambiente mantiene sus propias apps, base de
+// datos, Key Vault, registro, Redis, identidad y telemetría.
+resource sharedEnv 'Microsoft.App/managedEnvironments@2024-03-01' existing = if (!createEnv) {
+  name: 'cae-${prefix}-dev-vnet'
+  scope: resourceGroup(createEnv ? resourceGroup().name : envHostResourceGroup)
+}
+
+output caEnvId string = createEnv ? caEnv.id : sharedEnv.id
+output caEnvDomain string = createEnv ? caEnv!.properties.defaultDomain : sharedEnv!.properties.defaultDomain

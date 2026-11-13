@@ -19,6 +19,8 @@ jobs:
       url: ${{ steps.app.outputs.url }}
     env:
       RG: rg-duelo-magos-${{ inputs.env }}
+      # Azure for Students: 1 entorno de Container Apps por región; prod usa el de dev.
+      ENV_HOST_RG: ${{ inputs.env == 'prod' && 'rg-duelo-magos-dev' || '' }}
       LOCATION: ${{ vars.AZURE_LOCATION || 'canadacentral' }}
     steps:
       - uses: actions/checkout@v4
@@ -36,7 +38,7 @@ jobs:
           DEPLOYER_OID=$(az account get-access-token --query accessToken -o tsv | cut -d. -f2 | tr '_-' '/+' | base64 -d 2>/dev/null | jq -r .oid)
           if ! az deployment group create -g "$RG" -n core-${{ github.run_id }} \
             -f infra/core.bicep \
-            -p env=${{ inputs.env }} location="$LOCATION" deployerPrincipalId="$DEPLOYER_OID" \
+            -p env=${{ inputs.env }} location="$LOCATION" deployerPrincipalId="$DEPLOYER_OID" envHostResourceGroup="$ENV_HOST_RG" \
             --query properties.outputs -o json > core.json 2> err.txt; then
             ./scripts/report-deploy-errors.sh "$RG" core-${{ github.run_id }} err.txt; exit 1
           fi

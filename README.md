@@ -10,7 +10,8 @@ réplica se reinicie, y nunca le envía a un jugador lo que no debe ver.
 
 | | |
 |---|---|
-| **URL pública (prod)** | https://ca-duelo-prod.&lt;dominio&gt;.canadacentral.azurecontainerapps.io — ver [Despliegue](#despliegue-en-azure) |
+| **URL pública (dev)** | https://ca-duelo-dev.victoriousisland-0bfb0177.canadacentral.azurecontainerapps.io/play/ |
+| **URL pública (prod)** | se publica al aprobar el despliegue a prod (ver Actions → Desplegar) |
 | **Cliente de prueba** | `/play/` |
 | **API REST (OpenAPI 3.1)** | `/docs` · [`contracts/openapi.yaml`](contracts/openapi.yaml) |
 | **Tiempo real (AsyncAPI 3.0)** | `wss://…/v1/ws` · [`contracts/asyncapi.yaml`](contracts/asyncapi.yaml) |
