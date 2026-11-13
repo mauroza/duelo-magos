@@ -212,6 +212,7 @@ function enterMatch(matchId, code = null) {
   $('log').innerHTML = '';
   show('game');
   subscribe(matchId);
+  maybeTutorial();
 }
 
 function leaveGameView() {
@@ -274,6 +275,7 @@ function renderGame() {
     $('players').append(el);
   });
   $('lobbyActions').hidden = v.status !== 'lobby';
+  $('shareCode').textContent = st.code ? `Comparte este código con tus amigos para que se unan: ${st.code}` : 'Tus amigos pueden unirse desde «Salas abiertas» en el vestíbulo.';
   $('ready').textContent = me?.ready ? 'Ya no estoy listo' : 'Estoy listo';
   const playing = v.status === 'active' && me?.alive;
   $('actions').hidden = !playing;
@@ -287,6 +289,15 @@ function renderGame() {
       b.classList.toggle('selected', b.dataset.el === st.element);
     }
     $('attack').disabled = acted || me.mana < 1 || !st.element || !st.target;
+    const targetName = v.players.find((x) => x.id === st.target)?.name;
+    $('attack').textContent = st.element && targetName ? `Atacar a ${targetName} con ${EMOJI[st.element]} ${st.element}` : 'Atacar (1 maná)';
+    const stepState = [Boolean(st.element), Boolean(st.target), false];
+    const current = acted ? -1 : stepState.findIndex((d) => !d);
+    document.querySelectorAll('#steps li').forEach((li, k) => {
+      li.classList.toggle('done', !acted && stepState[k]);
+      li.classList.toggle('current', k === current);
+    });
+    $('steps').hidden = acted || me.mana < 1;
     $('shield').disabled = acted || me.mana < 1 || v.you?.shieldAvailable === false;
     $('channel').disabled = acted;
     $('waiting').textContent = acted ? 'Jugada enviada. Esperando a los demás magos…' : '';
@@ -476,18 +487,94 @@ function logout(reason) {
 }
 
 // ───────────── eventos ─────────────
+let authMode = 'login';
+const USER_RE = /^[a-zA-Z0-9_.-]{3,32}$/;
+function setAuthMode(mode) {
+  authMode = mode;
+  for (const t of document.querySelectorAll('.tab')) t.classList.toggle('active', t.dataset.tab === mode);
+  $('authSubmit').textContent = mode === 'login' ? 'Iniciar sesión' : 'Crear cuenta';
+  $('password').autocomplete = mode === 'login' ? 'current-password' : 'new-password';
+  $('authError').textContent = '';
+  validateAuth();
+}
+function validateAuth(show = false) {
+  const u = $('username').value.trim();
+  const p = $('password').value;
+  let uMsg = 'De 3 a 32 caracteres: letras sin tildes, números, punto (.), guion (-) o guion bajo (_). Sin espacios. Es el nombre que verán los demás magos.';
+  let uOk = USER_RE.test(u);
+  if (u && !uOk) {
+    if (u.length < 3) uMsg = `Muy corto: ${u.length}/3 caracteres mínimo.`;
+    else if (/\s/.test(u)) uMsg = 'No puede tener espacios. Usa guion bajo, por ejemplo: mago_rojo.';
+    else if (/[^a-zA-Z0-9_.-]/.test(u)) uMsg = 'Solo letras sin tildes ni ñ, números, punto, guion o guion bajo.';
+  }
+  const pOk = authMode === 'login' ? p.length > 0 : p.length >= 10;
+  const pMsg = authMode === 'login'
+    ? 'La contraseña con la que creaste tu cuenta.'
+    : p.length === 0 ? 'Mínimo 10 caracteres. Puede ser una frase, por ejemplo: mi mago favorito 7.'
+    : p.length < 10 ? `Te faltan ${10 - p.length} caracteres (${p.length}/10).` : '¡Contraseña válida!';
+  $('userHint').textContent = uMsg;
+  $('userHint').className = `hint${u && !uOk ? ' bad' : u && uOk ? ' good' : ''}`;
+  $('pwHint').textContent = pMsg;
+  $('pwHint').className = `hint${p && !pOk ? ' bad' : p && pOk && authMode === 'register' ? ' good' : ''}`;
+  $('username').classList.toggle('invalid', Boolean((u || show) && !uOk));
+  $('username').classList.toggle('valid', uOk);
+  $('password').classList.toggle('invalid', Boolean((p || show) && !pOk));
+  return uOk && pOk;
+}
+const AUTH_ERRORS = {
+  USERNAME_TAKEN: 'Ese nombre de usuario ya existe. Prueba con otro o entra en «Ya tengo cuenta».',
+  INVALID_CREDENTIALS: 'Usuario o contraseña incorrectos. Si es tu primera vez, ve a «Soy nuevo».',
+  VALIDATION_FAILED: 'Revisa el nombre de usuario y la contraseña: no cumplen los requisitos de arriba.',
+  ACCOUNT_SUSPENDED: 'Tu cuenta está suspendida.',
+  RATE_LIMITED: 'Demasiados intentos. Espera un minuto y vuelve a probar.',
+};
+for (const t of document.querySelectorAll('.tab')) t.onclick = () => setAuthMode(t.dataset.tab);
+$('username').addEventListener('input', () => validateAuth());
+$('password').addEventListener('input', () => validateAuth());
+$('togglePw').onclick = () => {
+  const show = $('password').type === 'password';
+  $('password').type = show ? 'text' : 'password';
+  $('togglePw').textContent = show ? 'Ocultar' : 'Mostrar';
+};
 $('authForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const mode = e.submitter?.dataset.mode ?? 'login';
-  const f = new FormData(e.target);
   $('authError').textContent = '';
+  if (!validateAuth(true)) {
+    $('authError').textContent = 'Completa los campos como indican las ayudas en gris.';
+    return;
+  }
   try {
-    const data = await api('POST', `/v1/auth/${mode}`, { username: f.get('username'), password: f.get('password') });
+    const data = await api('POST', `/v1/auth/${authMode}`, { username: $('username').value.trim(), password: $('password').value });
     await startSession(data);
   } catch (err) {
-    $('authError').textContent = err.status === 429 ? 'Demasiados intentos; espera un momento.' : err.message;
+    $('authError').textContent = AUTH_ERRORS[err.code] ?? (err.status === 429 ? AUTH_ERRORS.RATE_LIMITED : err.message);
   }
 });
+setAuthMode('login');
+
+// ───────────── tutorial ─────────────
+let tutI = 0;
+function showTutorial(i = 0) {
+  tutI = i;
+  const steps = document.querySelectorAll('.tut-step');
+  steps.forEach((s, k) => (s.hidden = k !== i));
+  $('tutPrev').disabled = i === 0;
+  $('tutNext').textContent = i === steps.length - 1 ? '¡A jugar!' : 'Siguiente';
+  $('tutorial').hidden = false;
+}
+function closeTutorial() {
+  $('tutorial').hidden = true;
+  try { localStorage.setItem('tutorialSeen', '1'); } catch { /* sin almacenamiento */ }
+}
+$('tutNext').onclick = () => (tutI >= document.querySelectorAll('.tut-step').length - 1 ? closeTutorial() : showTutorial(tutI + 1));
+$('tutPrev').onclick = () => showTutorial(Math.max(0, tutI - 1));
+$('tutSkip').onclick = closeTutorial;
+$('help').onclick = () => showTutorial(0);
+function maybeTutorial() {
+  let seen = false;
+  try { seen = localStorage.getItem('tutorialSeen') === '1'; } catch { /* sin almacenamiento */ }
+  if (!seen) showTutorial(0);
+}
 $('logout').onclick = () => logout();
 $('quick').onclick = async () => {
   try {

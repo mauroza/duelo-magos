@@ -22,13 +22,21 @@
     <section id="auth" class="card narrow">
       <h1>Entra al círculo</h1>
       <p class="muted">Cada ronda todos eligen en secreto: atacar con un elemento, levantar un escudo o canalizar maná.</p>
-      <form id="authForm">
-        <label>Usuario <input name="username" autocomplete="username" required minlength="3" maxlength="32" pattern="[a-zA-Z0-9_.\-]+"></label>
-        <label>Contraseña <input name="password" type="password" autocomplete="current-password" required minlength="10" maxlength="128"></label>
-        <div class="row">
-          <button type="submit" data-mode="login">Iniciar sesión</button>
-          <button type="submit" data-mode="register" class="secondary">Crear cuenta</button>
+      <div class="tabs" role="tablist">
+        <button type="button" class="tab active" data-tab="login" role="tab">Ya tengo cuenta</button>
+        <button type="button" class="tab" data-tab="register" role="tab">Soy nuevo</button>
+      </div>
+      <form id="authForm" novalidate>
+        <label for="username">Nombre de usuario</label>
+        <input id="username" name="username" autocomplete="username" maxlength="32" placeholder="ej. merlin_77">
+        <p class="hint" id="userHint">De 3 a 32 caracteres: letras sin tildes, números, punto (.), guion (-) o guion bajo (_). Sin espacios. Es el nombre que verán los demás magos.</p>
+        <label for="password">Contraseña</label>
+        <div class="pw">
+          <input id="password" name="password" type="password" autocomplete="current-password" maxlength="128" placeholder="mínimo 10 caracteres">
+          <button type="button" class="ghost small-btn" id="togglePw">Mostrar</button>
         </div>
+        <p class="hint" id="pwHint">Mínimo 10 caracteres. Puede ser una frase, por ejemplo: <em>mi mago favorito 7</em>.</p>
+        <button type="submit" id="authSubmit">Iniciar sesión</button>
         <p class="error" id="authError" role="alert"></p>
       </form>
     </section>
@@ -69,12 +77,14 @@
         <div><span class="muted">Ronda</span> <strong id="round">–</strong></div>
         <div class="timer"><div id="timerFill"></div></div>
         <div id="code" class="muted"></div>
+        <button id="help" class="ghost" title="Cómo se juega">? Cómo se juega</button>
         <button id="leave" class="ghost">Abandonar</button>
       </div>
       <div id="players" class="players"></div>
 
       <div id="lobbyActions" class="card center" hidden>
-        <p class="muted">Inicia cuando todos están listos (mínimo 2).</p>
+        <p class="muted">La partida empieza sola cuando <strong>todos</strong> marcan «Estoy listo» (mínimo 2 magos).</p>
+        <p class="muted small" id="shareCode"></p>
         <button id="ready">Estoy listo</button>
       </div>
 
@@ -88,11 +98,16 @@
           <button class="el agua" data-el="agua">💧 Agua</button>
           <button class="el tierra" data-el="tierra">🪨 Tierra</button>
         </div>
-        <p class="muted small">Agua apaga Fuego · Fuego calcina Tierra · Tierra absorbe Agua. Toca a un rival para elegir objetivo.</p>
+        <ol class="steps" id="steps">
+          <li data-step="1">Elige un <strong>elemento</strong> arriba.</li>
+          <li data-step="2">Toca a un <strong>rival</strong> en la arena (aparece una mira roja).</li>
+          <li data-step="3">Pulsa <strong>Atacar</strong>.</li>
+        </ol>
+        <p class="muted small">💧 Agua vence a 🔥 Fuego · 🔥 Fuego vence a 🪨 Tierra · 🪨 Tierra vence a 💧 Agua. O, en vez de atacar:</p>
         <div class="row">
           <button id="attack" disabled>Atacar (1 maná)</button>
-          <button id="shield" class="secondary">Escudo (1 maná)</button>
-          <button id="channel" class="secondary">Canalizar (+2 maná)</button>
+          <button id="shield" class="secondary" title="Bloquea todo el daño de esta ronda">🛡 Escudo (1 maná)</button>
+          <button id="channel" class="secondary" title="Recupera maná; recibes +1 de daño si te atacan">✦ Canalizar (+2 maná)</button>
         </div>
         <p class="error" id="actionError" role="alert"></p>
         <p class="muted" id="waiting"></p>
@@ -110,6 +125,49 @@
       </div>
     </section>
   </main>
+  <!-- Tutorial -->
+  <div id="tutorial" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="tutTitle">
+    <div class="modal-card">
+      <div class="tut-step" data-i="0">
+        <h2 id="tutTitle">¿Cómo se juega? (1/4)</h2>
+        <p>Cada <strong>ronda</strong>, todos los magos eligen <strong>en secreto y al mismo tiempo</strong> una acción. Cuando todos eligieron (o se acaba el tiempo de la barra), la ronda se resuelve y ves qué hizo cada uno.</p>
+        <p>Empiezas con <strong>❤ 12 de vida</strong> y <strong>✦ 2 de maná</strong>. <strong>Gana el último mago en pie.</strong></p>
+      </div>
+      <div class="tut-step" data-i="1" hidden>
+        <h2>Tus 3 acciones (2/4)</h2>
+        <ul>
+          <li><strong>Atacar</strong> (cuesta 1 maná): elige un elemento, <strong>toca al rival</strong> en la arena y pulsa Atacar. Hace 2 de daño.</li>
+          <li><strong>🛡 Escudo</strong> (1 maná): bloquea <strong>todo</strong> el daño de esa ronda. No se puede usar dos rondas seguidas.</li>
+          <li><strong>✦ Canalizar</strong> (gratis): recuperas 2 de maná, pero si te atacan recibes +1 de daño. Si no eliges a tiempo, canalizas.</li>
+        </ul>
+      </div>
+      <div class="tut-step" data-i="2" hidden>
+        <h2>Elementos y bonos (3/4)</h2>
+        <p>💧 Agua vence a 🔥 Fuego · 🔥 Fuego vence a 🪨 Tierra · 🪨 Tierra vence a 💧 Agua.</p>
+        <ul>
+          <li><strong>+2 de daño</strong> si tu elemento vence al que usó tu objetivo en esa ronda.</li>
+          <li><strong>+1 de daño</strong> si atacas con tu <strong>afinidad secreta</strong> (la ves en «Tu jugada»; los demás no la conocen).</li>
+          <li><strong>+1 de daño</strong> si tu objetivo estaba canalizando.</li>
+        </ul>
+      </div>
+      <div class="tut-step" data-i="3" hidden>
+        <h2>Consejos (4/4)</h2>
+        <ul>
+          <li>Sin maná no puedes atacar ni usar escudo: canaliza para recargar.</li>
+          <li>La burbuja sobre cada mago dice si ya eligió (✓) o sigue pensando (…).</li>
+          <li>Si te desconectas tienes 30 segundos para volver; si no, abandonas.</li>
+          <li>Puedes volver a ver esta guía con el botón <strong>? Cómo se juega</strong>.</li>
+        </ul>
+      </div>
+      <div class="row between">
+        <button class="ghost" id="tutSkip">Saltar</button>
+        <div class="row">
+          <button class="secondary" id="tutPrev">Anterior</button>
+          <button id="tutNext">Siguiente</button>
+        </div>
+      </div>
+    </div>
+  </div>
   <footer class="muted small">API: <a href="/docs">/docs</a> · Protocolo: <a href="/contracts/asyncapi.yaml">AsyncAPI</a></footer>
 </body>
 </html>
