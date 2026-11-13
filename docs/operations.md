@@ -2,13 +2,10 @@
 
 ## Pipeline
 
-```
-push a main ──▶ CI ──▶ dev (automático) ──▶ prod (aprobación manual en GitHub)
-                │        │                    │
-                │        └ core.bicep → secreto JWT → imagen → app.bicep → prueba de humo → drenado
-                └ lint · tipos · unitarias · integración (Postgres y Redis reales) · AsyncAPI · OpenAPI
-                  · npm audit · gitleaks · imagen no root · Trivy · Bicep · CodeQL (workflow aparte)
-```
+1. **Push a main** inicia el pipeline.
+2. **CI:** lint, tipos, pruebas unitarias, pruebas de integración con PostgreSQL y Redis reales, validación de AsyncAPI y OpenAPI, npm audit, gitleaks, imagen sin root, Trivy y Bicep. CodeQL corre en un workflow aparte.
+3. **dev (automático):** core.bicep, secretos en Key Vault, construcción y publicación de la imagen, app.bicep, prueba de humo con bots y drenado de la revisión anterior.
+4. **prod (aprobación manual en GitHub):** los mismos pasos que dev.
 
 - **Autenticación en Azure:** OIDC (`azure/login`) con una identidad administrada federada. No hay
   secretos en GitHub; solo variables con identificadores.

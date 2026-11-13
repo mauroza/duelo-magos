@@ -2,25 +2,13 @@
 
 ## Vista general
 
-```
-                 HTTPS / WSS
-  Jugadores ───────────────────▶  Azure Container Apps (ingreso, TLS)
-  (web, bot)                        │  revisiones múltiples, 1..3 réplicas
-                                    ▼
-                    ┌───────────────────────────────┐
-                    │  Réplica del servidor (Node)  │  ×N, sin estado en memoria
-                    │  transport ─▶ app ─▶ domain   │
-                    └──────┬──────────────┬─────────┘
-            identidad      │              │ identidad administrada
-           administrada    ▼              ▼
-          ┌────────────────────┐   ┌─────────────────────────┐
-          │ PostgreSQL Flexible│   │ Redis privado (VNet)    │
-          │ estado confirmado, │   │ pub/sub entre réplicas, │
-          │ bitácora, usuarios │   │ tickets, límites, cola, │
-          └────────────────────┘   │ presencia               │
-                                   └─────────────────────────┘
-   Key Vault (secreto JWT) · Container Registry · Application Insights + Log Analytics
-```
+Componentes y flujo, de afuera hacia adentro:
+
+1. **Jugadores** (cliente web y bot) se conectan por **HTTPS y WSS** a **Azure Container Apps**, que termina TLS en el ingreso.
+2. **Réplicas del servidor (Node.js)**, de 1 a 3, sin estado en memoria y con revisiones múltiples. Cada réplica tiene tres capas: transporte, aplicación y dominio.
+3. **PostgreSQL Flexible Server** guarda el estado confirmado de cada partida, la bitácora de eventos y los usuarios. Se accede con identidad administrada.
+4. **Redis privado (dentro de la VNet)** transporta el pub/sub entre réplicas, los tickets de WebSocket, los límites de tasa, la cola de emparejamiento y la presencia.
+5. **Servicios de apoyo:** Key Vault (secretos), Container Registry (imágenes), Application Insights y Log Analytics (observabilidad).
 
 Cualquier réplica puede atender a cualquier jugador de cualquier partida. No hay afinidad de sesión.
 
@@ -115,11 +103,10 @@ cuello de botella.
 
 ## Ciclo de vida de una partida
 
-```
-lobby ──(todos listos, ≥2)──▶ active ──(1 vivo / 0 vivos / máx. rondas)──▶ finished
-  │                             │
-  └─(TTL de inactividad / vacía)┴─(admin)──────────────────────────────────▶ aborted
-```
+- **lobby → active:** cuando todos los jugadores están listos y hay al menos 2.
+- **active → finished:** cuando queda 1 mago vivo, no queda ninguno o se alcanza el máximo de rondas.
+- **lobby → aborted:** cuando la sala queda vacía o vence su tiempo de inactividad.
+- **lobby o active → aborted:** cuando un administrador termina la partida.
 
 Al terminar, se liberan las membresías activas (`active_membership`) y la fila queda **inmutable**:
 un trigger impide modificar partidas terminadas, y `match_events` y `audit_log` son de solo inserción.
