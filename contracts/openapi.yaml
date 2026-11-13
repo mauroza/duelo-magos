@@ -7,20 +7,28 @@ info:
     Todo lo que no es tiempo real. Las jugadas viajan por WebSocket (ver `/contracts/asyncapi.yaml`).
     Los errores siguen RFC 9457 Problem Details (`application/problem+json`).
     Autenticación: `Authorization: Bearer <accessToken>` (JWT HS256, 15 min). El refresh token rota en cada uso.
-  license: { name: MIT }
+  license: { name: MIT, identifier: MIT }
 servers:
   - url: /
 security:
   - bearer: []
 tags:
   - name: auth
+    description: Registro, inicio de sesión y tokens
   - name: users
+    description: Perfil del usuario
   - name: realtime
+    description: Acceso al WebSocket
   - name: matches
+    description: Salas y partidas
   - name: matchmaking
+    description: Cola rápida
   - name: history
+    description: Historial de partidas
   - name: admin
+    description: Administración (solo rol admin, auditada)
   - name: health
+    description: Sondas de salud
 
 paths:
   /v1/auth/register:
@@ -44,6 +52,7 @@ paths:
     post:
       tags: [auth]
       operationId: login
+      summary: Iniciar sesión
       security: []
       requestBody:
         required: true
@@ -72,6 +81,7 @@ paths:
     post:
       tags: [auth]
       operationId: logout
+      summary: Cerrar sesión (revoca la familia del refresh token)
       security: []
       requestBody:
         required: true
@@ -82,12 +92,14 @@ paths:
     get:
       tags: [users]
       operationId: getMe
+      summary: Ver mi perfil
       responses:
         '200': { description: Perfil, content: { application/json: { schema: { $ref: '#/components/schemas/UserProfile' } } } }
         '401': { $ref: '#/components/responses/Problem' }
     patch:
       tags: [users]
       operationId: updateMe
+      summary: Cambiar mi nombre visible
       requestBody:
         required: true
         content:
@@ -164,6 +176,7 @@ paths:
     post:
       tags: [matches]
       operationId: joinByCode
+      summary: Unirse a una sala privada con su código
       requestBody:
         required: true
         content:
@@ -198,6 +211,7 @@ paths:
     post:
       tags: [matches]
       operationId: joinMatch
+      summary: Unirse a una sala pública
       parameters: [{ $ref: '#/components/parameters/MatchId' }]
       responses:
         '200': { description: Unido, content: { application/json: { schema: { $ref: '#/components/schemas/PlayerView' } } } }
@@ -267,6 +281,7 @@ paths:
     delete:
       tags: [matchmaking]
       operationId: dequeue
+      summary: Salir de la cola rápida
       responses:
         '204': { description: Fuera de la cola }
   /v1/history:
@@ -301,6 +316,7 @@ paths:
     get:
       tags: [admin]
       operationId: adminListMatches
+      summary: Listar partidas por estado
       parameters:
         - { name: status, in: query, schema: { type: string, enum: [lobby, active, finished, aborted], default: active } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
@@ -311,6 +327,7 @@ paths:
     get:
       tags: [admin]
       operationId: adminConnections
+      summary: Ver conexiones WebSocket vivas
       responses:
         '200': { description: Conexiones vivas por usuario }
         '403': { $ref: '#/components/responses/Problem' }
@@ -318,6 +335,7 @@ paths:
     post:
       tags: [admin]
       operationId: adminTerminate
+      summary: Terminar una partida
       parameters: [{ $ref: '#/components/parameters/MatchId' }]
       responses:
         '204': { description: Terminada (auditado) }
@@ -327,6 +345,7 @@ paths:
     post:
       tags: [admin]
       operationId: adminSuspend
+      summary: Suspender un usuario
       parameters: [{ $ref: '#/components/parameters/UserId' }]
       responses:
         '204': { description: Suspendido; sus sesiones y conexiones se cierran (auditado) }
@@ -335,6 +354,7 @@ paths:
     post:
       tags: [admin]
       operationId: adminReinstate
+      summary: Rehabilitar un usuario
       parameters: [{ $ref: '#/components/parameters/UserId' }]
       responses:
         '204': { description: Rehabilitado (auditado) }
@@ -343,6 +363,7 @@ paths:
     get:
       tags: [admin]
       operationId: adminAudit
+      summary: Ver la bitácora de auditoría
       parameters: [{ $ref: '#/components/parameters/Limit' }]
       responses:
         '200': { description: Bitácora de auditoría (solo inserción) }
@@ -351,16 +372,18 @@ paths:
     get:
       tags: [health]
       operationId: live
+      summary: Sonda de vida
       security: []
       responses: { '200': { description: El proceso responde } }
   /health/ready:
     get:
       tags: [health]
       operationId: ready
+      summary: Sonda de disponibilidad
       security: []
       responses:
         '200': { description: Listo (PostgreSQL y Redis accesibles) }
-        '503': { description: No listo (arrancando, drenando o sin dependencias) }
+        '503': { description: 'No listo: arrancando, drenando o sin dependencias' }
 
 components:
   securitySchemes:
