@@ -231,7 +231,7 @@ components:
             required: [matchId, clientMoveId, round, action]
             properties:
               matchId: { $ref: '#/components/schemas/Uuid' }
-              clientMoveId: { $ref: '#/components/schemas/Uuid', description: Idempotencia: reenviar con el mismo id no aplica la jugada dos veces }
+              clientMoveId: { $ref: '#/components/schemas/Uuid', description: 'Idempotencia: reenviar con el mismo id no aplica la jugada dos veces' }
               round: { type: integer, minimum: 1, maximum: 1000 }
               action: { $ref: '#/components/schemas/Action' }
       examples:

@@ -1,21 +1,24 @@
-import { DomainError, type DomainErrorCode } from '../domain/index.js';
+import { DOMAIN_ERROR_CODES, DomainError, type DomainErrorCode } from '../domain/index.js';
 
-export type AppErrorCode =
-  | DomainErrorCode
-  | 'VALIDATION_FAILED'
-  | 'UNAUTHENTICATED'
-  | 'INVALID_CREDENTIALS'
-  | 'TOKEN_REUSED'
-  | 'ACCOUNT_SUSPENDED'
-  | 'FORBIDDEN'
-  | 'NOT_FOUND'
-  | 'USERNAME_TAKEN'
-  | 'ALREADY_IN_MATCH'
-  | 'INVALID_INVITE_CODE'
-  | 'RATE_LIMITED'
-  | 'PAYLOAD_TOO_LARGE'
-  | 'UNSUPPORTED_VERSION'
-  | 'INTERNAL';
+export const APP_ERROR_CODES = [
+  ...DOMAIN_ERROR_CODES,
+  'VALIDATION_FAILED',
+  'UNAUTHENTICATED',
+  'INVALID_CREDENTIALS',
+  'TOKEN_REUSED',
+  'ACCOUNT_SUSPENDED',
+  'FORBIDDEN',
+  'NOT_FOUND',
+  'USERNAME_TAKEN',
+  'ALREADY_IN_MATCH',
+  'INVALID_INVITE_CODE',
+  'RATE_LIMITED',
+  'PAYLOAD_TOO_LARGE',
+  'UNSUPPORTED_VERSION',
+  'INTERNAL',
+] as const;
+
+export type AppErrorCode = (typeof APP_ERROR_CODES)[number];
 
 /** Error de aplicación que se serializa como RFC 9457 Problem Details (HTTP) o mensaje `error` (WebSocket). */
 export class AppError extends Error {
