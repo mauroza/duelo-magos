@@ -88,7 +88,7 @@ Resultados y análisis: [`docs/performance.md`](docs/performance.md).
 
 Todo se despliega con **GitHub Actions** y **Bicep**. No hay contraseñas, claves ni cadenas de
 conexión: GitHub entra a Azure con OIDC, y el servidor usa identidad administrada para Key Vault,
-PostgreSQL, Redis, el registro de contenedores y Application Insights.
+PostgreSQL, el registro de contenedores y Application Insights. Redis es privado (VNet) y su contraseña vive en Key Vault.
 
 1. Una sola vez, en Azure Cloud Shell: `infra/bootstrap-azure.sh` (crea los grupos de recursos y la
    identidad federada de GitHub).
