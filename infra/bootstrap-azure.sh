@@ -53,9 +53,15 @@ for env in dev prod; do
 done
 
 # Credenciales federadas: GitHub Actions obtiene un token de Azure sin secretos.
-for subject in "repo:$REPO:ref:refs/heads/main" "repo:$REPO:environment:dev" "repo:$REPO:environment:prod" \
-               "repo:$REPO:ref:refs/tags/v1.0.0"; do
-  name=$(echo "$subject" | tr ':/.' '---' | cut -c1-120)
+# GitHub puede emitir el "subject" en formato clásico (repo:dueño/repo:...) o con IDs inmutables
+# (repo:dueño@ID/repo@ID:...); se registran ambos.
+IDS=$(curl -fsSL "https://api.github.com/repos/$REPO" | python3 -c "import json,sys; d=json.load(sys.stdin); print(f\"{d['owner']['login']}@{d['owner']['id']}/{d['name']}@{d['id']}\")" || true)
+SUBJECTS=()
+for base in "$REPO" $IDS; do
+  for s in ref:refs/heads/main environment:dev environment:prod; do SUBJECTS+=("repo:$base:$s"); done
+done
+for subject in "${SUBJECTS[@]}"; do
+  name=$(echo "$subject" | tr ':/.@' '----' | cut -c1-120)
   az identity federated-credential create -g "rg-$PREFIX-cicd" --identity-name "$ID_NAME" -n "$name" \
     --issuer https://token.actions.githubusercontent.com --subject "$subject" \
     --audiences api://AzureADTokenExchange -o none 2>/dev/null || echo "  (ya existía: $subject)"
