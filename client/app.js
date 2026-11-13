@@ -307,8 +307,11 @@ function startTimer() {
 async function act(action) {
   $('actionError').textContent = '';
   try {
-    await send('action.submit', { matchId: st.matchId, clientMoveId: crypto.randomUUID(), round: st.view.round, action });
-    st.view.you.pendingAction = action;
+    const round = st.view.round;
+    await send('action.submit', { matchId: st.matchId, clientMoveId: crypto.randomUUID(), round, action });
+    // La confirmación puede llegar después del resultado de la ronda (si esta jugada la cerró):
+    // solo se marca como pendiente si seguimos en la misma ronda.
+    if (st.view.round === round && st.view.status === 'active') st.view.you.pendingAction = action;
     renderGame();
   } catch (e) {
     $('actionError').textContent = e.message;
