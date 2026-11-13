@@ -41,24 +41,27 @@ jobs:
             ./scripts/report-deploy-errors.sh "$RG" core-${{ github.run_id }} err.txt; exit 1
           fi
           for k in acrName acrLoginServer keyVaultName keyVaultUri appIdentityId appIdentityClientId appIdentityPrincipalId \
-                   appIdentityName pgHost redisHost appInsightsId logAnalyticsId caEnvId caEnvDomain; do
+                   appIdentityName pgHost appInsightsId logAnalyticsId caEnvId caEnvDomain; do
             echo "$k=$(jq -r ".$k.value" core.json)" >> "$GITHUB_OUTPUT"
           done
           AI=$(jq -r .appInsightsConnectionString.value core.json)
           echo "::add-mask::$AI"
           echo "aiConn=$AI" >> "$GITHUB_OUTPUT"
 
-      - name: Secreto de firma JWT en Key Vault (se crea solo una vez)
+      - name: Secretos en Key Vault (firma JWT y Redis; se generan una sola vez)
         run: |
           KV=${{ steps.core.outputs.keyVaultName }}
-          for i in 1 2 3 4 5 6; do
-            if az keyvault secret show --vault-name "$KV" -n jwt-signing-key --query id -o tsv >/dev/null 2>&1; then
-              echo "El secreto ya existe"; exit 0
-            fi
-            az keyvault secret set --vault-name "$KV" -n jwt-signing-key --value "$(openssl rand -base64 48)" -o none && exit 0
-            echo "Esperando a que se propague el rol en Key Vault..."; sleep 20
+          for name in jwt-signing-key redis-password; do
+            ok=0
+            for i in 1 2 3 4 5 6; do
+              if az keyvault secret show --vault-name "$KV" -n "$name" --query id -o tsv >/dev/null 2>&1; then
+                echo "$name ya existe"; ok=1; break
+              fi
+              if az keyvault secret set --vault-name "$KV" -n "$name" --value "$(openssl rand -hex 32)" -o none; then ok=1; break; fi
+              echo "Esperando a que se propague el rol en Key Vault..."; sleep 20
+            done
+            [ "$ok" = 1 ] || exit 1
           done
-          exit 1
 
       - name: Construir y publicar imagen
         id: image
@@ -78,10 +81,9 @@ jobs:
                acrLoginServer=${{ steps.core.outputs.acrLoginServer }} \
                appIdentityId=${{ steps.core.outputs.appIdentityId }} \
                appIdentityClientId=${{ steps.core.outputs.appIdentityClientId }} \
-               appIdentityPrincipalId=${{ steps.core.outputs.appIdentityPrincipalId }} \
                appIdentityName=${{ steps.core.outputs.appIdentityName }} \
                keyVaultUri=${{ steps.core.outputs.keyVaultUri }} \
-               pgHost=${{ steps.core.outputs.pgHost }} redisHost=${{ steps.core.outputs.redisHost }} \
+               pgHost=${{ steps.core.outputs.pgHost }} \
                appInsightsConnectionString="${{ steps.core.outputs.aiConn }}" \
                appInsightsId=${{ steps.core.outputs.appInsightsId }} logAnalyticsId=${{ steps.core.outputs.logAnalyticsId }} \
                caEnvId=${{ steps.core.outputs.caEnvId }} caEnvDomain=${{ steps.core.outputs.caEnvDomain }} \

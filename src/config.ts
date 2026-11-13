@@ -29,6 +29,14 @@ const schema = z.object({
   REDIS_PORT: z.coerce.number().int().default(6380),
   /** Object ID de la identidad administrada (usuario de Redis con autenticación Entra). */
   REDIS_USERNAME: z.string().optional(),
+  /**
+   * entra: Azure Managed Redis con identidad administrada.
+   * password: Redis en el entorno privado de Container Apps; la contraseña llega como secreto
+   * de Container Apps referenciado a Key Vault (leído con identidad administrada).
+   */
+  REDIS_AUTH: z.enum(['entra', 'password']).default('entra'),
+  REDIS_PASSWORD: z.string().min(16).optional(),
+  REDIS_TLS: bool.default(true),
 
   /** Solo en desarrollo. En producción el secreto se lee de Key Vault. */
   JWT_SECRET: z.string().min(32).optional(),

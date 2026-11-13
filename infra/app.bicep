@@ -11,11 +11,9 @@ param revisionSuffix string
 param acrLoginServer string
 param appIdentityId string
 param appIdentityClientId string
-param appIdentityPrincipalId string
 param appIdentityName string
 param keyVaultUri string
 param pgHost string
-param redisHost string
 @secure()
 param appInsightsConnectionString string
 param appInsightsId string
@@ -26,11 +24,47 @@ param caEnvDomain string
 param alertEmail string = ''
 
 var appName = 'ca-${prefix}-${env}'
+var redisName = 'ca-redis-${env}'
+// Secretos de Container Apps referenciados a Key Vault: se leen con la identidad administrada.
+var redisSecret = { name: 'redis-password', keyVaultUrl: '${keyVaultUri}secrets/redis-password', identity: appIdentityId }
+
+// Redis privado: solo accesible dentro del entorno (VNet), con contraseña de Key Vault.
+// Guarda únicamente datos efímeros (pub/sub, tickets, límites, cola, presencia): el estado de las
+// partidas vive en PostgreSQL, así que reiniciar Redis no pierde jugadas.
+resource redis 'Microsoft.App/containerApps@2024-03-01' = {
+  name: redisName
+  location: location
+  tags: tags
+  identity: { type: 'UserAssigned', userAssignedIdentities: { '${appIdentityId}': {} } }
+  properties: {
+    environmentId: caEnvId
+    workloadProfileName: 'Consumption'
+    configuration: {
+      activeRevisionsMode: 'Single'
+      ingress: { external: false, transport: 'tcp', targetPort: 6379, exposedPort: 6379 }
+      secrets: [redisSecret]
+    }
+    template: {
+      containers: [
+        {
+          name: 'redis'
+          image: 'docker.io/library/redis:7.4-alpine'
+          command: ['sh', '-c', 'exec redis-server --requirepass "$REDIS_PASSWORD" --save "" --appendonly no --maxmemory 400mb --maxmemory-policy noeviction']
+          env: [{ name: 'REDIS_PASSWORD', secretRef: 'redis-password' }]
+          resources: { cpu: json('0.25'), memory: '0.5Gi' }
+          probes: [{ type: 'Liveness', tcpSocket: { port: 6379 }, periodSeconds: 10 }]
+        }
+      ]
+      scale: { minReplicas: 1, maxReplicas: 1 }
+    }
+  }
+}
 var fqdn = '${appName}.${caEnvDomain}'
 var tags = { app: 'duelo-magos', env: env }
 
 resource app 'Microsoft.App/containerApps@2024-03-01' = {
   name: appName
+  dependsOn: [redis]
   location: location
   tags: tags
   identity: { type: 'UserAssigned', userAssignedIdentities: { '${appIdentityId}': {} } }
@@ -48,6 +82,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
         traffic: [{ latestRevision: true, weight: 100 }]
       }
       registries: [{ server: acrLoginServer, identity: appIdentityId }]
+      secrets: [redisSecret]
     }
     template: {
       revisionSuffix: revisionSuffix
@@ -65,9 +100,11 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             { name: 'PGHOST', value: pgHost }
             { name: 'PGDATABASE', value: 'duelo' }
             { name: 'PGUSER', value: appIdentityName }
-            { name: 'REDIS_HOST', value: redisHost }
-            { name: 'REDIS_PORT', value: '10000' }
-            { name: 'REDIS_USERNAME', value: appIdentityPrincipalId }
+            { name: 'REDIS_HOST', value: redisName }
+            { name: 'REDIS_PORT', value: '6379' }
+            { name: 'REDIS_AUTH', value: 'password' }
+            { name: 'REDIS_TLS', value: 'false' }
+            { name: 'REDIS_PASSWORD', secretRef: 'redis-password' }
             { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: appInsightsConnectionString }
             { name: 'ALLOWED_ORIGINS', value: 'https://${fqdn}' }
             { name: 'LOG_LEVEL', value: env == 'prod' ? 'info' : 'debug' }

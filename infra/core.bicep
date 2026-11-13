@@ -50,7 +50,7 @@ resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
   location: location
   tags: tags
   sku: { name: 'Basic' }
-  properties: { adminUserEnabled: false, anonymousPullEnabled: false }
+  properties: { adminUserEnabled: false }
 }
 
 // ───────────── Key Vault (RBAC) ─────────────
@@ -115,33 +115,24 @@ module pgAdmin 'modules/pg-admin.bicep' = {
   dependsOn: [pgExtensions]
 }
 
-// ───────────── Azure Managed Redis (solo autenticación Entra) ─────────────
-resource redis 'Microsoft.Cache/redisEnterprise@2024-10-01' = {
-  name: 'redis-${prefix}-${env}-${take(suffix, 8)}'
+// ───────────── red privada del entorno ─────────────
+// Redis corre dentro de esta VNet (ingreso TCP interno): no es accesible desde Internet.
+// (Azure Managed Redis Balanced_B0 no tenía capacidad en esta región: ver ADR-7.)
+resource vnet 'Microsoft.Network/virtualNetworks@2023-11-01' = {
+  name: 'vnet-${prefix}-${env}'
   location: location
   tags: tags
-  sku: { name: 'Balanced_B0' }
-  properties: { minimumTlsVersion: '1.2', highAvailability: 'Disabled' }
-}
-
-resource redisDb 'Microsoft.Cache/redisEnterprise/databases@2024-10-01' = {
-  parent: redis
-  name: 'default'
   properties: {
-    clientProtocol: 'Encrypted'
-    port: 10000
-    clusteringPolicy: 'EnterpriseCluster'
-    evictionPolicy: 'NoEviction'
-    accessKeysAuthentication: 'Disabled'
-  }
-}
-
-resource redisAccess 'Microsoft.Cache/redisEnterprise/databases/accessPolicyAssignments@2024-10-01' = {
-  parent: redisDb
-  name: 'appidentity'
-  properties: {
-    accessPolicyName: 'default'
-    user: { objectId: appId.properties.principalId }
+    addressSpace: { addressPrefixes: ['10.40.0.0/16'] }
+    subnets: [
+      {
+        name: 'container-apps'
+        properties: {
+          addressPrefix: '10.40.0.0/23'
+          delegations: [{ name: 'apps', properties: { serviceName: 'Microsoft.App/environments' } }]
+        }
+      }
+    ]
   }
 }
 
@@ -195,7 +186,7 @@ resource appTelemetry 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
 
 // ───────────── entorno de Container Apps ─────────────
 resource caEnv 'Microsoft.App/managedEnvironments@2024-03-01' = {
-  name: 'cae-${prefix}-${env}'
+  name: 'cae-${prefix}-${env}-vnet'
   location: location
   tags: tags
   properties: {
@@ -207,6 +198,7 @@ resource caEnv 'Microsoft.App/managedEnvironments@2024-03-01' = {
       }
     }
     workloadProfiles: [{ name: 'Consumption', workloadProfileType: 'Consumption' }]
+    vnetConfiguration: { infrastructureSubnetId: vnet.properties.subnets[0].id, internal: false }
   }
 }
 
@@ -219,7 +211,6 @@ output appIdentityClientId string = appId.properties.clientId
 output appIdentityPrincipalId string = appId.properties.principalId
 output appIdentityName string = appId.name
 output pgHost string = pg.properties.fullyQualifiedDomainName
-output redisHost string = redis.properties.hostName
 output appInsightsConnectionString string = appInsights.properties.ConnectionString
 output appInsightsId string = appInsights.id
 output logAnalyticsId string = logs.id

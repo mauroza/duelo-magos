@@ -17,7 +17,17 @@ export async function createRedis(cfg: Config): Promise<RedisClients> {
   let options: RedisOptions = { maxRetriesPerRequest: 3, enableAutoPipelining: true, lazyConnect: true };
   let refresh: NodeJS.Timeout | undefined;
 
-  if (cfg.AUTH_MODE === 'azure') {
+  if (cfg.AUTH_MODE === 'azure' && cfg.REDIS_AUTH === 'password') {
+    // Redis privado dentro de la VNet del entorno; contraseña desde Key Vault vía secreto de Container Apps.
+    if (!cfg.REDIS_PASSWORD) throw new Error('Falta REDIS_PASSWORD (secreto de Key Vault)');
+    options = {
+      ...options,
+      host: cfg.REDIS_HOST,
+      port: cfg.REDIS_PORT,
+      password: cfg.REDIS_PASSWORD,
+      ...(cfg.REDIS_TLS ? { tls: { servername: cfg.REDIS_HOST } } : {}),
+    };
+  } else if (cfg.AUTH_MODE === 'azure') {
     // Autenticación Entra: usuario = object id de la identidad, contraseña = token de corta duración.
     const { token } = await getAccessToken(cfg, REDIS_SCOPE);
     options = {
@@ -36,7 +46,7 @@ export async function createRedis(cfg: Config): Promise<RedisClients> {
   const sub = make();
   await Promise.all([cmd.connect(), sub.connect()]);
 
-  if (cfg.AUTH_MODE === 'azure') {
+  if (cfg.AUTH_MODE === 'azure' && cfg.REDIS_AUTH === 'entra') {
     // Los tokens duran ~1 h: se renueva la autenticación cada 30 min en ambas conexiones.
     refresh = setInterval(() => {
       void (async () => {
