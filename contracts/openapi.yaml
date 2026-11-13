@@ -1,0 +1,519 @@
+openapi: 3.1.0
+info:
+  title: Duelo de Magos — API REST
+  version: 1.0.0
+  summary: Usuarios, salas, emparejamiento, historial y administración.
+  description: |
+    Todo lo que no es tiempo real. Las jugadas viajan por WebSocket (ver `/contracts/asyncapi.yaml`).
+    Los errores siguen RFC 9457 Problem Details (`application/problem+json`).
+    Autenticación: `Authorization: Bearer <accessToken>` (JWT HS256, 15 min). El refresh token rota en cada uso.
+  license: { name: MIT }
+servers:
+  - url: /
+security:
+  - bearer: []
+tags:
+  - name: auth
+  - name: users
+  - name: realtime
+  - name: matches
+  - name: matchmaking
+  - name: history
+  - name: admin
+  - name: health
+
+paths:
+  /v1/auth/register:
+    post:
+      tags: [auth]
+      operationId: register
+      security: []
+      summary: Registrar usuario (contraseña con Argon2id)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+            example: { username: merlin, password: 'una-clave-larga-123', displayName: Merlín }
+      responses:
+        '201': { description: Creado, content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /v1/auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Session' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /v1/auth/refresh:
+    post:
+      tags: [auth]
+      operationId: refresh
+      security: []
+      summary: Rotar el refresh token. Reutilizar uno ya usado revoca toda la familia (TOKEN_REUSED).
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RefreshRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TokenPair' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /v1/auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RefreshRequest' } } }
+      responses:
+        '204': { description: Sesión cerrada }
+  /v1/users/me:
+    get:
+      tags: [users]
+      operationId: getMe
+      responses:
+        '200': { description: Perfil, content: { application/json: { schema: { $ref: '#/components/schemas/UserProfile' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+    patch:
+      tags: [users]
+      operationId: updateMe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [displayName]
+              properties: { displayName: { type: string, minLength: 1, maxLength: 32 } }
+      responses:
+        '200': { description: Perfil, content: { application/json: { schema: { $ref: '#/components/schemas/UserProfile' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+  /v1/realtime/ticket:
+    post:
+      tags: [realtime]
+      operationId: createTicket
+      summary: Ticket de un solo uso (30 s) para abrir el WebSocket `/v1/ws?ticket=...`
+      responses:
+        '201':
+          description: Ticket emitido
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ticket, expiresIn]
+                properties: { ticket: { type: string }, expiresIn: { type: integer, example: 30 } }
+        '401': { $ref: '#/components/responses/Problem' }
+  /v1/matches:
+    post:
+      tags: [matches]
+      operationId: createMatch
+      summary: Crear sala pública o privada (con código de invitación)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                visibility: { type: string, enum: [public, private], default: public }
+                maxPlayers: { type: integer, minimum: 2, maximum: 4 }
+      responses:
+        '201':
+          description: Sala creada
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [matchId, inviteCode, view]
+                properties:
+                  matchId: { type: string, format: uuid }
+                  inviteCode: { type: [string, 'null'], example: K7QH2M }
+                  view: { $ref: '#/components/schemas/PlayerView' }
+        '409': { $ref: '#/components/responses/Problem' }
+    get:
+      tags: [matches]
+      operationId: listMatches
+      summary: Listar salas públicas abiertas (paginado por cursor)
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: Página
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/MatchSummary' } }
+                  nextCursor: { type: [string, 'null'] }
+  /v1/matches/join-by-code:
+    post:
+      tags: [matches]
+      operationId: joinByCode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [code]
+              properties: { code: { type: string, pattern: '^[A-Za-z0-9]{6}$' } }
+      responses:
+        '200': { description: Unido, content: { application/json: { schema: { $ref: '#/components/schemas/PlayerView' } } } }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /v1/matches/{id}:
+    get:
+      tags: [matches]
+      operationId: getMatch
+      summary: Vista de la partida filtrada para quien consulta (nunca incluye información oculta de otros)
+      parameters: [{ $ref: '#/components/parameters/MatchId' }]
+      responses:
+        '200':
+          description: Vista
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [view, seq]
+                properties: { view: { $ref: '#/components/schemas/PlayerView' }, seq: { type: integer } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+  /v1/matches/{id}/join:
+    post:
+      tags: [matches]
+      operationId: joinMatch
+      parameters: [{ $ref: '#/components/parameters/MatchId' }]
+      responses:
+        '200': { description: Unido, content: { application/json: { schema: { $ref: '#/components/schemas/PlayerView' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /v1/matches/{id}/leave:
+    post:
+      tags: [matches]
+      operationId: leaveMatch
+      summary: Salir. En una partida en curso equivale a abandonar.
+      parameters: [{ $ref: '#/components/parameters/MatchId' }]
+      responses:
+        '204': { description: Fuera }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/matches/{id}/ready:
+    post:
+      tags: [matches]
+      operationId: setReady
+      summary: Marcar «listo». Inicia sola cuando todos están listos y hay 2 o más jugadores.
+      parameters: [{ $ref: '#/components/parameters/MatchId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false, required: [ready], properties: { ready: { type: boolean } } }
+      responses:
+        '204': { description: OK }
+        '409': { $ref: '#/components/responses/Problem' }
+  /v1/matches/{id}/replay:
+    get:
+      tags: [matches]
+      operationId: replayMatch
+      summary: Bitácora inmutable para reproducir la partida jugada por jugada (solo participantes)
+      parameters: [{ $ref: '#/components/parameters/MatchId' }]
+      responses:
+        '200':
+          description: Eventos en orden
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [matchId, events]
+                properties:
+                  matchId: { type: string, format: uuid }
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      required: [seq, event]
+                      properties: { seq: { type: integer }, event: { type: object } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/matchmaking/queue:
+    post:
+      tags: [matchmaking]
+      operationId: enqueue
+      summary: Entrar a la cola rápida. El aviso llega por WebSocket (`matchmaking.matched`).
+      responses:
+        '202':
+          description: En cola
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [queued, position, maxWaitMs]
+                properties: { queued: { type: boolean }, position: { type: integer }, maxWaitMs: { type: integer } }
+        '409': { $ref: '#/components/responses/Problem' }
+    delete:
+      tags: [matchmaking]
+      operationId: dequeue
+      responses:
+        '204': { description: Fuera de la cola }
+  /v1/history:
+    get:
+      tags: [history]
+      operationId: getHistory
+      summary: Partidas jugadas por el usuario autenticado (paginado)
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: Página
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  nextCursor: { type: [string, 'null'] }
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        matchId: { type: string, format: uuid }
+                        status: { type: string }
+                        finishedAt: { type: [string, 'null'], format: date-time }
+                        result: { $ref: '#/components/schemas/MatchResult' }
+                        won: { type: boolean }
+  /v1/admin/matches:
+    get:
+      tags: [admin]
+      operationId: adminListMatches
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [lobby, active, finished, aborted], default: active } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200': { description: Partidas, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/MatchSummary' } } } } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/admin/connections:
+    get:
+      tags: [admin]
+      operationId: adminConnections
+      responses:
+        '200': { description: Conexiones vivas por usuario }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/admin/matches/{id}/terminate:
+    post:
+      tags: [admin]
+      operationId: adminTerminate
+      parameters: [{ $ref: '#/components/parameters/MatchId' }]
+      responses:
+        '204': { description: Terminada (auditado) }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /v1/admin/users/{id}/suspend:
+    post:
+      tags: [admin]
+      operationId: adminSuspend
+      parameters: [{ $ref: '#/components/parameters/UserId' }]
+      responses:
+        '204': { description: Suspendido; sus sesiones y conexiones se cierran (auditado) }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/admin/users/{id}/reinstate:
+    post:
+      tags: [admin]
+      operationId: adminReinstate
+      parameters: [{ $ref: '#/components/parameters/UserId' }]
+      responses:
+        '204': { description: Rehabilitado (auditado) }
+        '403': { $ref: '#/components/responses/Problem' }
+  /v1/admin/audit:
+    get:
+      tags: [admin]
+      operationId: adminAudit
+      parameters: [{ $ref: '#/components/parameters/Limit' }]
+      responses:
+        '200': { description: Bitácora de auditoría (solo inserción) }
+        '403': { $ref: '#/components/responses/Problem' }
+  /health/live:
+    get:
+      tags: [health]
+      operationId: live
+      security: []
+      responses: { '200': { description: El proceso responde } }
+  /health/ready:
+    get:
+      tags: [health]
+      operationId: ready
+      security: []
+      responses:
+        '200': { description: Listo (PostgreSQL y Redis accesibles) }
+        '503': { description: No listo (arrancando, drenando o sin dependencias) }
+
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, bearerFormat: JWT }
+  parameters:
+    MatchId: { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    UserId: { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+    Cursor: { name: cursor, in: query, schema: { type: string, format: date-time } }
+  responses:
+    Problem:
+      description: Error (RFC 9457)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    TooManyRequests:
+      description: Límite de tasa excedido
+      headers:
+        Retry-After: { schema: { type: integer }, description: Segundos a esperar }
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { $ref: '#/components/schemas/ErrorCode' }
+        traceId: { type: string }
+      example:
+        type: https://duelo-magos.dev/problems/match-full
+        title: Conflicto
+        status: 409
+        detail: La sala está llena
+        instance: /v1/matches/1b9d.../join
+        code: MATCH_FULL
+    ErrorCode:
+      type: string
+      enum:
+        [MATCH_NOT_IN_LOBBY, MATCH_NOT_ACTIVE, MATCH_FULL, ALREADY_JOINED, NOT_A_PARTICIPANT, NOT_ENOUGH_PLAYERS,
+         PLAYER_ELIMINATED, ALREADY_ACTED, STALE_ROUND, NOT_ENOUGH_MANA, INVALID_TARGET, SHIELD_COOLDOWN,
+         VALIDATION_FAILED, UNAUTHENTICATED, INVALID_CREDENTIALS, TOKEN_REUSED, ACCOUNT_SUSPENDED, FORBIDDEN,
+         NOT_FOUND, USERNAME_TAKEN, ALREADY_IN_MATCH, INVALID_INVITE_CODE, RATE_LIMITED, PAYLOAD_TOO_LARGE,
+         UNSUPPORTED_VERSION, INTERNAL]
+    RegisterRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 3, maxLength: 32, pattern: '^[a-zA-Z0-9_.-]+$' }
+        password: { type: string, minLength: 10, maxLength: 128 }
+        displayName: { type: string, minLength: 1, maxLength: 32 }
+    LoginRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string }
+    RefreshRequest:
+      type: object
+      additionalProperties: false
+      required: [refreshToken]
+      properties: { refreshToken: { type: string } }
+    TokenPair:
+      type: object
+      required: [accessToken, refreshToken, tokenType, expiresIn]
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string }
+        tokenType: { type: string, const: Bearer }
+        expiresIn: { type: integer, example: 900 }
+    Session:
+      allOf:
+        - $ref: '#/components/schemas/TokenPair'
+        - type: object
+          required: [user]
+          properties:
+            user:
+              type: object
+              properties: { id: { type: string, format: uuid }, name: { type: string }, role: { type: string, enum: [player, admin] } }
+    UserProfile:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        displayName: { type: string }
+        role: { type: string, enum: [player, admin] }
+        suspended: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    MatchSummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        visibility: { type: string, enum: [public, private] }
+        status: { type: string, enum: [lobby, active, finished, aborted] }
+        hostName: { type: string }
+        players: { type: integer }
+        maxPlayers: { type: integer }
+        createdAt: { type: string, format: date-time }
+    Action:
+      oneOf:
+        - type: object
+          required: [kind, element, target]
+          properties:
+            kind: { const: attack }
+            element: { type: string, enum: [fuego, agua, tierra] }
+            target: { type: string, format: uuid }
+        - type: object
+          required: [kind]
+          properties: { kind: { const: shield } }
+        - type: object
+          required: [kind]
+          properties: { kind: { const: channel } }
+    MatchResult:
+      type: [object, 'null']
+      properties:
+        winners: { type: array, items: { type: string, format: uuid } }
+        draw: { type: boolean }
+        reason: { type: string, enum: [last_standing, max_rounds, all_eliminated, abandonment, terminated] }
+    PlayerView:
+      type: object
+      description: Vista filtrada. `you` solo contiene la afinidad y la jugada pendiente propias; `affinities` es null hasta el final.
+      properties:
+        matchId: { type: string, format: uuid }
+        status: { type: string, enum: [lobby, active, finished, aborted] }
+        hostId: { type: string, format: uuid }
+        round: { type: integer }
+        roundDeadline: { type: [integer, 'null'], description: epoch ms }
+        config: { type: object }
+        players:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              name: { type: string }
+              hp: { type: integer }
+              mana: { type: integer }
+              alive: { type: boolean }
+              connected: { type: boolean }
+              ready: { type: boolean }
+              hasActed: { type: boolean }
+        you:
+          type: [object, 'null']
+          properties:
+            id: { type: string, format: uuid }
+            affinity: { type: [string, 'null'], enum: [fuego, agua, tierra, null] }
+            pendingAction: { oneOf: [{ $ref: '#/components/schemas/Action' }, { type: 'null' }] }
+        result: { $ref: '#/components/schemas/MatchResult' }
+        affinities: { type: [object, 'null'], additionalProperties: { type: string } }

@@ -1,0 +1,383 @@
+asyncapi: 3.0.0
+info:
+  title: Duelo de Magos — protocolo de tiempo real
+  version: 1.0.0
+  description: |
+    WebSocket seguro (`wss://`). Cada mensaje es JSON con el sobre `{ v, type, id?, payload }`.
+    `v` es la versión del protocolo (1). `id` lo pone el cliente y el servidor lo devuelve como `replyTo`.
+
+    **Autenticación**: `POST /v1/realtime/ticket` entrega un ticket de un solo uso (30 s); se abre
+    `/v1/ws?ticket=<ticket>`. Sin ticket válido, el servidor cierra con 4001.
+
+    **Orden**: cada cambio confirmado de una partida tiene un número de secuencia. `match.update` trae
+    `fromSeq..toSeq`; si `fromSeq` no es `último + 1`, el cliente envía `match.subscribe` para resincronizar.
+
+    **Heartbeat**: el servidor envía frames ping cada `heartbeatMs`; si no hay pong a tiempo cierra con 4011
+    y el jugador entra en periodo de gracia. Los navegadores responden ping automáticamente.
+
+    **Códigos de cierre**: 1000 normal · 1001 yéndose · 1009 mensaje demasiado grande (> 4 KiB) ·
+    4001 ticket inválido · 4003 origen no permitido · 4008 violación de política · 4009 demasiadas conexiones
+    por usuario · 4010 cuenta suspendida · 4011 sin heartbeat · 4012 servidor reiniciando: reconectar.
+
+    **Límites**: 10 mensajes/s por conexión (ráfaga de 20); excederlos produce `error` RATE_LIMITED.
+  license: { name: MIT }
+defaultContentType: application/json
+
+servers:
+  production:
+    host: duelo-magos.azurecontainerapps.io
+    pathname: /v1/ws
+    protocol: wss
+    description: El host real se publica en el README tras el despliegue.
+  local:
+    host: localhost:8080
+    pathname: /v1/ws
+    protocol: ws
+
+channels:
+  game:
+    address: /v1/ws
+    bindings:
+      ws:
+        query:
+          type: object
+          required: [ticket]
+          properties: { ticket: { type: string, description: Ticket de un solo uso } }
+    messages:
+      matchSubscribe: { $ref: '#/components/messages/matchSubscribe' }
+      matchUnsubscribe: { $ref: '#/components/messages/matchUnsubscribe' }
+      matchReady: { $ref: '#/components/messages/matchReady' }
+      actionSubmit: { $ref: '#/components/messages/actionSubmit' }
+      ping: { $ref: '#/components/messages/ping' }
+      welcome: { $ref: '#/components/messages/welcome' }
+      ack: { $ref: '#/components/messages/ack' }
+      error: { $ref: '#/components/messages/error' }
+      matchSync: { $ref: '#/components/messages/matchSync' }
+      matchUpdate: { $ref: '#/components/messages/matchUpdate' }
+      matchmakingMatched: { $ref: '#/components/messages/matchmakingMatched' }
+      matchmakingTimeout: { $ref: '#/components/messages/matchmakingTimeout' }
+      pong: { $ref: '#/components/messages/pong' }
+
+operations:
+  sendSubscribe:
+    action: send
+    channel: { $ref: '#/channels/game' }
+    summary: Suscribirse a una partida (o resincronizar). Responde con match.sync.
+    messages: [{ $ref: '#/channels/game/messages/matchSubscribe' }]
+  sendUnsubscribe:
+    action: send
+    channel: { $ref: '#/channels/game' }
+    messages: [{ $ref: '#/channels/game/messages/matchUnsubscribe' }]
+  sendReady:
+    action: send
+    channel: { $ref: '#/channels/game' }
+    messages: [{ $ref: '#/channels/game/messages/matchReady' }]
+  sendAction:
+    action: send
+    channel: { $ref: '#/channels/game' }
+    summary: Enviar una intención. El servidor la valida y responde ack o error tipado.
+    messages: [{ $ref: '#/channels/game/messages/actionSubmit' }]
+  sendPing:
+    action: send
+    channel: { $ref: '#/channels/game' }
+    messages: [{ $ref: '#/channels/game/messages/ping' }]
+  receiveWelcome:
+    action: receive
+    channel: { $ref: '#/channels/game' }
+    messages: [{ $ref: '#/channels/game/messages/welcome' }]
+  receiveAck:
+    action: receive
+    channel: { $ref: '#/channels/game' }
+    messages: [{ $ref: '#/channels/game/messages/ack' }]
+  receiveError:
+    action: receive
+    channel: { $ref: '#/channels/game' }
+    messages: [{ $ref: '#/channels/game/messages/error' }]
+  receiveSync:
+    action: receive
+    channel: { $ref: '#/channels/game' }
+    messages: [{ $ref: '#/channels/game/messages/matchSync' }]
+  receiveUpdate:
+    action: receive
+    channel: { $ref: '#/channels/game' }
+    summary: Cambios mínimos (solo eventos), filtrados por jugador.
+    messages: [{ $ref: '#/channels/game/messages/matchUpdate' }]
+  receiveMatched:
+    action: receive
+    channel: { $ref: '#/channels/game' }
+    messages: [{ $ref: '#/channels/game/messages/matchmakingMatched' }]
+  receiveTimeout:
+    action: receive
+    channel: { $ref: '#/channels/game' }
+    messages: [{ $ref: '#/channels/game/messages/matchmakingTimeout' }]
+  receivePong:
+    action: receive
+    channel: { $ref: '#/channels/game' }
+    messages: [{ $ref: '#/channels/game/messages/pong' }]
+
+components:
+  schemas:
+    Uuid: { type: string, format: uuid }
+    Element: { type: string, enum: [fuego, agua, tierra] }
+    Action:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [kind, element, target]
+          properties:
+            kind: { const: attack }
+            element: { $ref: '#/components/schemas/Element' }
+            target: { $ref: '#/components/schemas/Uuid' }
+        - type: object
+          additionalProperties: false
+          required: [kind]
+          properties: { kind: { const: shield } }
+        - type: object
+          additionalProperties: false
+          required: [kind]
+          properties: { kind: { const: channel } }
+    ErrorCode:
+      type: string
+      enum:
+        [MATCH_NOT_IN_LOBBY, MATCH_NOT_ACTIVE, MATCH_FULL, ALREADY_JOINED, NOT_A_PARTICIPANT, NOT_ENOUGH_PLAYERS,
+         PLAYER_ELIMINATED, ALREADY_ACTED, STALE_ROUND, NOT_ENOUGH_MANA, INVALID_TARGET, SHIELD_COOLDOWN,
+         VALIDATION_FAILED, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND, RATE_LIMITED, UNSUPPORTED_VERSION, INTERNAL]
+    DomainEvent:
+      type: object
+      required: [seq, type]
+      description: |
+        Tipos: lobby.updated, match.started, affinity.assigned (privado: solo a su dueño), action.accepted
+        (solo dice QUIÉN jugó, nunca QUÉ), round.resolved (revela las jugadas de la ronda ya cerrada),
+        player.presence, player.abandoned, match.ended (revela todas las afinidades), match.expired.
+      properties:
+        seq: { type: integer }
+        type:
+          type: string
+          enum: [lobby.updated, match.started, affinity.assigned, action.accepted, round.resolved, player.presence, player.abandoned, match.ended, match.expired]
+      additionalProperties: true
+    Envelope:
+      type: object
+      required: [v, type, payload]
+      properties:
+        v: { const: 1 }
+        type: { type: string }
+        id: { type: string, maxLength: 64 }
+        payload: { type: object }
+
+  messages:
+    matchSubscribe:
+      name: match.subscribe
+      title: Suscribirse a partida
+      payload:
+        type: object
+        additionalProperties: false
+        required: [v, type, payload]
+        properties:
+          v: { const: 1 }
+          type: { const: match.subscribe }
+          id: { type: string, maxLength: 64 }
+          payload:
+            type: object
+            additionalProperties: false
+            required: [matchId]
+            properties: { matchId: { $ref: '#/components/schemas/Uuid' } }
+      examples:
+        - name: subscribe
+          payload: { v: 1, type: match.subscribe, id: m1, payload: { matchId: 6f1c2b8e-1d2a-4c3b-9e4f-0a1b2c3d4e5f } }
+    matchUnsubscribe:
+      name: match.unsubscribe
+      payload:
+        type: object
+        required: [v, type, payload]
+        properties:
+          v: { const: 1 }
+          type: { const: match.unsubscribe }
+          id: { type: string }
+          payload: { type: object, required: [matchId], properties: { matchId: { $ref: '#/components/schemas/Uuid' } } }
+      examples:
+        - name: unsubscribe
+          payload: { v: 1, type: match.unsubscribe, payload: { matchId: 6f1c2b8e-1d2a-4c3b-9e4f-0a1b2c3d4e5f } }
+    matchReady:
+      name: match.ready
+      payload:
+        type: object
+        required: [v, type, payload]
+        properties:
+          v: { const: 1 }
+          type: { const: match.ready }
+          id: { type: string }
+          payload:
+            type: object
+            required: [matchId, ready]
+            properties: { matchId: { $ref: '#/components/schemas/Uuid' }, ready: { type: boolean } }
+      examples:
+        - name: ready
+          payload: { v: 1, type: match.ready, id: r1, payload: { matchId: 6f1c2b8e-1d2a-4c3b-9e4f-0a1b2c3d4e5f, ready: true } }
+    actionSubmit:
+      name: action.submit
+      title: Enviar jugada (intención)
+      summary: Errores posibles — STALE_ROUND, ALREADY_ACTED, NOT_ENOUGH_MANA, INVALID_TARGET, SHIELD_COOLDOWN, PLAYER_ELIMINATED, MATCH_NOT_ACTIVE, NOT_A_PARTICIPANT, RATE_LIMITED, VALIDATION_FAILED.
+      payload:
+        type: object
+        additionalProperties: false
+        required: [v, type, payload]
+        properties:
+          v: { const: 1 }
+          type: { const: action.submit }
+          id: { type: string, maxLength: 64 }
+          payload:
+            type: object
+            additionalProperties: false
+            required: [matchId, clientMoveId, round, action]
+            properties:
+              matchId: { $ref: '#/components/schemas/Uuid' }
+              clientMoveId: { $ref: '#/components/schemas/Uuid', description: Idempotencia: reenviar con el mismo id no aplica la jugada dos veces }
+              round: { type: integer, minimum: 1, maximum: 1000 }
+              action: { $ref: '#/components/schemas/Action' }
+      examples:
+        - name: attack
+          payload:
+            v: 1
+            type: action.submit
+            id: a7
+            payload:
+              matchId: 6f1c2b8e-1d2a-4c3b-9e4f-0a1b2c3d4e5f
+              clientMoveId: 0d4c1e7a-9b8f-4a6e-8c2d-1f3e5a7b9c0d
+              round: 3
+              action: { kind: attack, element: agua, target: 2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d }
+        - name: shield
+          payload:
+            v: 1
+            type: action.submit
+            id: a8
+            payload: { matchId: 6f1c2b8e-1d2a-4c3b-9e4f-0a1b2c3d4e5f, clientMoveId: 1d4c1e7a-9b8f-4a6e-8c2d-1f3e5a7b9c0d, round: 4, action: { kind: shield } }
+    ping:
+      name: ping
+      payload:
+        type: object
+        required: [v, type, payload]
+        properties: { v: { const: 1 }, type: { const: ping }, id: { type: string }, payload: { type: object } }
+      examples:
+        - name: ping
+          payload: { v: 1, type: ping, id: p1, payload: {} }
+
+    welcome:
+      name: welcome
+      payload:
+        type: object
+        properties:
+          v: { const: 1 }
+          type: { const: welcome }
+          payload:
+            type: object
+            properties: { userId: { $ref: '#/components/schemas/Uuid' }, protocolVersion: { const: 1 }, heartbeatMs: { type: integer } }
+      examples:
+        - name: welcome
+          payload: { v: 1, type: welcome, payload: { userId: 2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d, protocolVersion: 1, heartbeatMs: 15000 } }
+    ack:
+      name: ack
+      payload:
+        type: object
+        properties:
+          v: { const: 1 }
+          type: { const: ack }
+          replyTo: { type: string }
+          payload:
+            type: object
+            properties: { ok: { const: true }, duplicate: { type: boolean }, seq: { type: integer } }
+      examples:
+        - name: accepted
+          payload: { v: 1, type: ack, replyTo: a7, payload: { ok: true, duplicate: false, seq: 18 } }
+        - name: duplicate
+          payload: { v: 1, type: ack, replyTo: a7, payload: { ok: true, duplicate: true, seq: 18 } }
+    error:
+      name: error
+      title: Error tipado
+      payload:
+        type: object
+        properties:
+          v: { const: 1 }
+          type: { const: error }
+          replyTo: { type: string }
+          payload:
+            type: object
+            required: [code, message]
+            properties: { code: { $ref: '#/components/schemas/ErrorCode' }, message: { type: string }, errors: { type: array } }
+      examples:
+        - name: staleRound
+          payload: { v: 1, type: error, replyTo: a7, payload: { code: STALE_ROUND, message: 'La jugada es de la ronda 3, la actual es 4' } }
+    matchSync:
+      name: match.sync
+      title: Vista completa filtrada (al suscribirse o resincronizar)
+      payload:
+        type: object
+        properties:
+          v: { const: 1 }
+          type: { const: match.sync }
+          replyTo: { type: string }
+          payload:
+            type: object
+            required: [matchId, seq, view]
+            properties:
+              matchId: { $ref: '#/components/schemas/Uuid' }
+              seq: { type: integer }
+              view: { type: object, description: Igual a PlayerView de OpenAPI }
+      examples:
+        - name: sync
+          payload:
+            v: 1
+            type: match.sync
+            replyTo: m1
+            payload:
+              matchId: 6f1c2b8e-1d2a-4c3b-9e4f-0a1b2c3d4e5f
+              seq: 12
+              view: { matchId: 6f1c2b8e-1d2a-4c3b-9e4f-0a1b2c3d4e5f, status: active, round: 3, players: [], you: { id: 2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d, affinity: agua, pendingAction: null } }
+    matchUpdate:
+      name: match.update
+      title: Cambios mínimos
+      payload:
+        type: object
+        properties:
+          v: { const: 1 }
+          type: { const: match.update }
+          payload:
+            type: object
+            required: [matchId, fromSeq, toSeq, events]
+            properties:
+              matchId: { $ref: '#/components/schemas/Uuid' }
+              fromSeq: { type: integer }
+              toSeq: { type: integer }
+              events: { type: array, items: { $ref: '#/components/schemas/DomainEvent' } }
+      examples:
+        - name: actionAccepted
+          payload:
+            v: 1
+            type: match.update
+            payload: { matchId: 6f1c2b8e-1d2a-4c3b-9e4f-0a1b2c3d4e5f, fromSeq: 13, toSeq: 13, events: [{ seq: 13, type: action.accepted, round: 3, playerId: 2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c6d }] }
+    matchmakingMatched:
+      name: matchmaking.matched
+      payload:
+        type: object
+        properties:
+          v: { const: 1 }
+          type: { const: matchmaking.matched }
+          payload: { type: object, properties: { matchId: { $ref: '#/components/schemas/Uuid' } } }
+      examples:
+        - name: matched
+          payload: { v: 1, type: matchmaking.matched, payload: { matchId: 6f1c2b8e-1d2a-4c3b-9e4f-0a1b2c3d4e5f } }
+    matchmakingTimeout:
+      name: matchmaking.timeout
+      payload:
+        type: object
+        properties: { v: { const: 1 }, type: { const: matchmaking.timeout }, payload: { type: object } }
+      examples:
+        - name: timeout
+          payload: { v: 1, type: matchmaking.timeout, payload: {} }
+    pong:
+      name: pong
+      payload:
+        type: object
+        properties: { v: { const: 1 }, type: { const: pong }, replyTo: { type: string }, payload: { type: object } }
+      examples:
+        - name: pong
+          payload: { v: 1, type: pong, replyTo: p1, payload: {} }

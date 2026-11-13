@@ -1,0 +1,12 @@
+node_modules
+dist
+.git
+.github
+coverage
+respaldo
+test
+load
+infra
+docs
+*.md
+.env*

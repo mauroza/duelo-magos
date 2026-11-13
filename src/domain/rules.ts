@@ -420,7 +420,13 @@ export interface PlayerView {
   readonly roundDeadline: number | null;
   readonly config: Pick<MatchConfig, 'minPlayers' | 'maxPlayers' | 'roundMs' | 'graceMs' | 'maxRounds' | 'maxMana'>;
   readonly players: readonly (PublicPlayer & { readonly ready: boolean; readonly hasActed: boolean })[];
-  readonly you: { readonly id: string; readonly affinity: Element | null; readonly pendingAction: Action | null } | null;
+  readonly you: {
+    readonly id: string;
+    readonly affinity: Element | null;
+    readonly pendingAction: Action | null;
+    /** false si usó escudo en la ronda anterior. */
+    readonly shieldAvailable: boolean;
+  } | null;
   readonly result: MatchResult | null;
   readonly affinities: Readonly<Record<string, Element>> | null;
 }
@@ -448,7 +454,14 @@ export function playerView(state: MatchState, viewerId: string | null): PlayerVi
       ready: p.ready,
       hasActed: Boolean(state.pending[p.id]),
     })),
-    you: me ? { id: me.id, affinity: me.affinity, pendingAction: state.pending[me.id] ?? null } : null,
+    you: me
+      ? {
+          id: me.id,
+          affinity: me.affinity,
+          pendingAction: state.pending[me.id] ?? null,
+          shieldAvailable: me.lastShieldRound === null || me.lastShieldRound !== state.round - 1,
+        }
+      : null,
     result: state.result,
     affinities: ended ? affinities : null,
   };
