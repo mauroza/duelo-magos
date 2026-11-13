@@ -8,12 +8,25 @@
 set -euo pipefail
 
 REPO="${REPO:-mauroza/duelo-magos}"
-LOCATION="${LOCATION:-eastus2}"
+LOCATION="${LOCATION:-}"
 PREFIX="${PREFIX:-duelo-magos}"
 
 SUB=$(az account show --query id -o tsv)
 TENANT=$(az account show --query tenantId -o tsv)
 echo "Suscripción: $(az account show --query name -o tsv) ($SUB)"
+
+# Azure for Students restringe las regiones con una política. Se detectan las permitidas.
+ALLOWED=$(az policy assignment list --query "[].parameters.listOfAllowedLocations.value[]" -o tsv 2>/dev/null | sort -u || true)
+if [ -n "$ALLOWED" ]; then
+  echo "Regiones permitidas por tu suscripción: $(echo $ALLOWED | tr '\n' ' ')"
+fi
+if [ -z "$LOCATION" ]; then
+  for pref in eastus centralus southcentralus westus2 westus3 northcentralus canadacentral brazilsouth mexicocentral eastus2 westeurope northeurope; do
+    if [ -z "$ALLOWED" ] || echo "$ALLOWED" | grep -qx "$pref"; then LOCATION="$pref"; break; fi
+  done
+  [ -z "$LOCATION" ] && LOCATION=$(echo "$ALLOWED" | head -n1)
+fi
+echo "Región elegida: $LOCATION"
 
 echo "Registrando proveedores de recursos (puede tardar unos minutos)..."
 for ns in Microsoft.App Microsoft.OperationalInsights Microsoft.Insights Microsoft.ContainerRegistry \
@@ -21,13 +34,15 @@ for ns in Microsoft.App Microsoft.OperationalInsights Microsoft.Insights Microso
   az provider register --namespace "$ns" --wait >/dev/null
 done
 
-for env in dev prod; do
-  az group create -n "rg-$PREFIX-$env" -l "$LOCATION" -o none
+# Si el grupo ya existe (por un intento anterior) se reutiliza: su región no limita la de los recursos.
+for g in dev prod cicd; do
+  if [ "$(az group exists -n "rg-$PREFIX-$g")" != "true" ]; then
+    az group create -n "rg-$PREFIX-$g" -l "$LOCATION" -o none
+  fi
 done
-az group create -n "rg-$PREFIX-cicd" -l "$LOCATION" -o none
 
 ID_NAME="id-$PREFIX-github"
-az identity create -g "rg-$PREFIX-cicd" -n "$ID_NAME" -o none
+az identity create -g "rg-$PREFIX-cicd" -n "$ID_NAME" -l "$LOCATION" -o none
 CLIENT_ID=$(az identity show -g "rg-$PREFIX-cicd" -n "$ID_NAME" --query clientId -o tsv)
 PRINCIPAL_ID=$(az identity show -g "rg-$PREFIX-cicd" -n "$ID_NAME" --query principalId -o tsv)
 
