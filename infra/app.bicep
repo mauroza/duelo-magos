@@ -147,6 +147,7 @@ resource latencyAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-preview
     displayName: 'Latencia por jugada alta (> 200 ms promedio en 5 min)'
     severity: 2
     enabled: true
+    skipQueryValidation: true
     evaluationFrequency: 'PT5M'
     windowSize: 'PT5M'
     scopes: [appInsightsId]
@@ -201,6 +202,8 @@ resource restartAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-preview
     displayName: 'Réplica reiniciándose repetidamente'
     severity: 2
     enabled: true
+    // La tabla de logs del sistema aparece cuando el entorno emite su primer log.
+    skipQueryValidation: true
     evaluationFrequency: 'PT5M'
     windowSize: 'PT15M'
     scopes: [logAnalyticsId]
