@@ -73,7 +73,7 @@ jobs:
       - name: Corre como usuario no root
         run: test "$(docker inspect -f '{{.Config.User}}' duelo-magos:ci)" = "node"
       - name: Sin vulnerabilidades críticas conocidas (Trivy)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: duelo-magos:ci
           severity: CRITICAL
