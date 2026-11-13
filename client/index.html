@@ -1,1 +1,115 @@
-<!doctype html><title>Duelo de Magos</title>
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Duelo de Magos</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <div class="brand"><span class="sigil" aria-hidden="true">✦</span> Duelo de Magos</div>
+    <div class="session" id="session" hidden>
+      <span id="who"></span>
+      <span class="dot" id="conn" title="Conexión"></span>
+      <button class="ghost" id="logout">Salir</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Acceso -->
+    <section id="auth" class="card narrow">
+      <h1>Entra al círculo</h1>
+      <p class="muted">Cada ronda todos eligen en secreto: atacar con un elemento, levantar un escudo o canalizar maná.</p>
+      <form id="authForm">
+        <label>Usuario <input name="username" autocomplete="username" required minlength="3" maxlength="32" pattern="[a-zA-Z0-9_.\-]+"></label>
+        <label>Contraseña <input name="password" type="password" autocomplete="current-password" required minlength="10" maxlength="128"></label>
+        <div class="row">
+          <button type="submit" data-mode="login">Iniciar sesión</button>
+          <button type="submit" data-mode="register" class="secondary">Crear cuenta</button>
+        </div>
+        <p class="error" id="authError" role="alert"></p>
+      </form>
+    </section>
+
+    <!-- Vestíbulo -->
+    <section id="lobby" class="grid" hidden>
+      <div class="card">
+        <h2>Partida rápida</h2>
+        <p class="muted">Te emparejamos con otro mago.</p>
+        <button id="quick">Buscar duelo</button>
+        <button id="cancelQuick" class="ghost" hidden>Cancelar búsqueda</button>
+        <p class="muted" id="queueInfo"></p>
+      </div>
+      <div class="card">
+        <h2>Sala propia</h2>
+        <div class="row">
+          <button id="createPublic">Crear pública</button>
+          <button id="createPrivate" class="secondary">Crear privada</button>
+        </div>
+        <form id="codeForm" class="row">
+          <input name="code" placeholder="Código" maxlength="6" pattern="[A-Za-z0-9]{6}" required>
+          <button class="secondary">Unirme</button>
+        </form>
+      </div>
+      <div class="card wide">
+        <div class="row between"><h2>Salas abiertas</h2><button id="refreshRooms" class="ghost">Actualizar</button></div>
+        <ul id="rooms" class="list"></ul>
+      </div>
+      <div class="card wide">
+        <h2>Tu historial</h2>
+        <ul id="history" class="list"></ul>
+      </div>
+    </section>
+
+    <!-- Partida -->
+    <section id="game" hidden>
+      <div class="gamebar">
+        <div><span class="muted">Ronda</span> <strong id="round">–</strong></div>
+        <div class="timer"><div id="timerFill"></div></div>
+        <div id="code" class="muted"></div>
+        <button id="leave" class="ghost">Abandonar</button>
+      </div>
+      <div id="players" class="players"></div>
+
+      <div id="lobbyActions" class="card center" hidden>
+        <p class="muted">Inicia cuando todos están listos (mínimo 2).</p>
+        <button id="ready">Estoy listo</button>
+      </div>
+
+      <div id="actions" class="card" hidden>
+        <div class="row between">
+          <h2>Tu jugada</h2>
+          <span>Afinidad secreta: <strong id="affinity" class="el"></strong></span>
+        </div>
+        <div class="elements" role="group" aria-label="Elemento">
+          <button class="el fuego" data-el="fuego">🔥 Fuego</button>
+          <button class="el agua" data-el="agua">💧 Agua</button>
+          <button class="el tierra" data-el="tierra">🪨 Tierra</button>
+        </div>
+        <p class="muted small">Agua apaga Fuego · Fuego calcina Tierra · Tierra absorbe Agua. Toca a un rival para elegir objetivo.</p>
+        <div class="row">
+          <button id="attack" disabled>Atacar (1 maná)</button>
+          <button id="shield" class="secondary">Escudo (1 maná)</button>
+          <button id="channel" class="secondary">Canalizar (+2 maná)</button>
+        </div>
+        <p class="error" id="actionError" role="alert"></p>
+        <p class="muted" id="waiting"></p>
+      </div>
+
+      <div id="result" class="card center" hidden>
+        <h2 id="resultTitle"></h2>
+        <p id="resultDetail" class="muted"></p>
+        <button id="back">Volver al vestíbulo</button>
+      </div>
+
+      <div class="card">
+        <h2>Crónica</h2>
+        <ol id="log" class="log"></ol>
+      </div>
+    </section>
+  </main>
+  <footer class="muted small">API: <a href="/docs">/docs</a> · Protocolo: <a href="/contracts/asyncapi.yaml">AsyncAPI</a></footer>
+</body>
+</html>
