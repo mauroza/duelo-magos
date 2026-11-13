@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # ---------- build ----------
-FROM node:22-alpine AS build
+FROM node:25-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts=false
@@ -10,7 +10,7 @@ RUN npm run build && cp -r src/infra/migrations dist/infra/migrations
 RUN npm prune --omit=dev
 
 # ---------- runtime ----------
-FROM node:22-alpine AS runtime
+FROM node:25-alpine AS runtime
 ENV NODE_ENV=production PORT=8080
 WORKDIR /app
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
