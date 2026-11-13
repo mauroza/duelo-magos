@@ -1,0 +1,19 @@
+# Configuración de gitleaks: reglas por defecto + excepciones explícitas y justificadas.
+# Los valores permitidos son credenciales FICTICIAS de desarrollo local y de pruebas automatizadas.
+# Producción no las acepta: loadConfig() rechaza JWT_SECRET con NODE_ENV=production, y en Azure no
+# existe ninguna contraseña (PostgreSQL y Redis usan solo identidad administrada; el secreto JWT
+# vive en Key Vault y lo genera el pipeline).
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Credenciales ficticias de desarrollo local y pruebas"
+regexTarget = "line"
+regexes = [
+  '''desarrollo-local-no-usar-en-produccion''',
+  '''duelo-local-dev''',
+  '''secreto-de-pruebas-de-al-menos-32-caracteres''',
+  '''contraseña-segura-123''',
+  '''contraseña-ficticia''',
+  '''una-clave-larga''',
+]

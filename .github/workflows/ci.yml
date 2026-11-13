@@ -73,7 +73,7 @@ jobs:
       - name: Corre como usuario no root
         run: test "$(docker inspect -f '{{.Config.User}}' duelo-magos:ci)" = "node"
       - name: Sin vulnerabilidades críticas conocidas (Trivy)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           image-ref: duelo-magos:ci
           severity: CRITICAL
@@ -86,5 +86,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: az bicep install
-      - run: az bicep build --file infra/core.bicep --stdout > /dev/null
-      - run: az bicep build --file infra/app.bicep --stdout > /dev/null
+      - name: Compilar plantillas (los errores se muestran como anotaciones)
+        run: |
+          status=0
+          for f in infra/core.bicep infra/app.bicep; do
+            if ! az bicep build --file "$f" --stdout > /dev/null 2> out.txt; then status=1; fi
+            grep -E "Error|Warning" out.txt | sed 's/^/::warning::/' || true
+          done
+          exit $status

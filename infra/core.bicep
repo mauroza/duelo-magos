@@ -105,13 +105,12 @@ resource pgExtensions 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@
 }
 
 // La identidad del servidor es la administradora Entra de la base (crea el esquema en las migraciones).
-resource pgAdmin 'Microsoft.DBforPostgreSQL/flexibleServers/administrators@2024-08-01' = {
-  parent: pg
-  name: appId.properties.principalId
-  properties: {
-    principalType: 'ServicePrincipal'
+module pgAdmin 'modules/pg-admin.bicep' = {
+  name: 'pg-admin'
+  params: {
+    serverName: pg.name
+    principalId: appId.properties.principalId
     principalName: appId.name
-    tenantId: subscription().tenantId
   }
   dependsOn: [pgExtensions]
 }
