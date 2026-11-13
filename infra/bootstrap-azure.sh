@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Configuración inicial de Azure, una sola vez.
+# Ejecutar en Azure Cloud Shell (portal.azure.com -> ícono >_ -> Bash):
+#   curl -fsSL https://raw.githubusercontent.com/mauroza/duelo-magos/main/infra/bootstrap-azure.sh | bash
+#
+# Crea los grupos de recursos dev y prod, y una identidad administrada que GitHub Actions
+# usa mediante OIDC (credencial federada). No se crea ni se guarda ninguna contraseña o clave.
+set -euo pipefail
+
+REPO="${REPO:-mauroza/duelo-magos}"
+LOCATION="${LOCATION:-eastus2}"
+PREFIX="${PREFIX:-duelo-magos}"
+
+SUB=$(az account show --query id -o tsv)
+TENANT=$(az account show --query tenantId -o tsv)
+echo "Suscripción: $(az account show --query name -o tsv) ($SUB)"
+
+echo "Registrando proveedores de recursos (puede tardar unos minutos)..."
+for ns in Microsoft.App Microsoft.OperationalInsights Microsoft.Insights Microsoft.ContainerRegistry \
+          Microsoft.KeyVault Microsoft.DBforPostgreSQL Microsoft.Cache Microsoft.ManagedIdentity; do
+  az provider register --namespace "$ns" --wait >/dev/null
+done
+
+for env in dev prod; do
+  az group create -n "rg-$PREFIX-$env" -l "$LOCATION" -o none
+done
+az group create -n "rg-$PREFIX-cicd" -l "$LOCATION" -o none
+
+ID_NAME="id-$PREFIX-github"
+az identity create -g "rg-$PREFIX-cicd" -n "$ID_NAME" -o none
+CLIENT_ID=$(az identity show -g "rg-$PREFIX-cicd" -n "$ID_NAME" --query clientId -o tsv)
+PRINCIPAL_ID=$(az identity show -g "rg-$PREFIX-cicd" -n "$ID_NAME" --query principalId -o tsv)
+
+# Owner sobre cada grupo: el Bicep asigna roles (AcrPull, Key Vault Secrets User) a la identidad del servidor.
+for env in dev prod; do
+  az role assignment create --assignee-object-id "$PRINCIPAL_ID" --assignee-principal-type ServicePrincipal \
+    --role Owner --scope "/subscriptions/$SUB/resourceGroups/rg-$PREFIX-$env" -o none || true
+done
+
+# Credenciales federadas: GitHub Actions obtiene un token de Azure sin secretos.
+for subject in "repo:$REPO:ref:refs/heads/main" "repo:$REPO:environment:dev" "repo:$REPO:environment:prod" \
+               "repo:$REPO:ref:refs/tags/v1.0.0"; do
+  name=$(echo "$subject" | tr ':/.' '---' | cut -c1-120)
+  az identity federated-credential create -g "rg-$PREFIX-cicd" --identity-name "$ID_NAME" -n "$name" \
+    --issuer https://token.actions.githubusercontent.com --subject "$subject" \
+    --audiences api://AzureADTokenExchange -o none 2>/dev/null || echo "  (ya existía: $subject)"
+done
+
+cat <<EOF
+
+==================================================================
+Listo. En GitHub: $REPO -> Settings -> Secrets and variables -> Actions
+-> pestaña "Variables" -> "New repository variable" y crea estas 4:
+
+  AZURE_CLIENT_ID        = $CLIENT_ID
+  AZURE_TENANT_ID        = $TENANT
+  AZURE_SUBSCRIPTION_ID  = $SUB
+  AZURE_LOCATION         = $LOCATION
+
+(No son secretos: identifican la identidad, pero no dan acceso por sí solos.)
+==================================================================
+EOF
