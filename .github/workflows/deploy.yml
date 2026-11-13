@@ -1,0 +1,31 @@
+name: Desplegar
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+  security-events: write
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  dev:
+    needs: ci
+    uses: ./.github/workflows/deploy-env.yml
+    with: { env: dev }
+
+  # prod exige aprobación manual (regla de protección del ambiente "prod" en GitHub).
+  prod:
+    needs: dev
+    uses: ./.github/workflows/deploy-env.yml
+    with: { env: prod }

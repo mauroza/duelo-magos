@@ -5,8 +5,9 @@ import { tryLeader } from '../infra/redis.js';
 import { AppError } from './errors.js';
 import type { MatchService } from './match-service.js';
 
-const QUEUE = 'mm:queue';
-const NAMES = 'mm:names';
+// Hash tag {mm}: ambas claves caen en el mismo slot (Redis en clúster admite el script multi-clave).
+const QUEUE = '{mm}:queue';
+const NAMES = '{mm}:names';
 
 /** Saca atómicamente hasta N jugadores de la cola (los más antiguos). */
 const POP_SCRIPT = `
@@ -61,7 +62,7 @@ export class Matchmaker {
   }
 
   async runOnce(): Promise<number> {
-    if (!(await tryLeader(this.redis, 'mm:leader', this.opts.instanceId, 3000))) return 0;
+    if (!(await tryLeader(this.redis, '{mm}:leader', this.opts.instanceId, 3000))) return 0;
     // Expira a quienes superaron el tiempo máximo de espera configurable.
     const expired = await this.redis.zrangebyscore(QUEUE, 0, Date.now() - this.opts.maxWaitMs);
     for (const userId of expired) {

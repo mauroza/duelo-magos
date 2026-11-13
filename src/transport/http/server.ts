@@ -126,7 +126,7 @@ export async function buildHttpServer(deps: HttpDeps): Promise<FastifyInstance> 
   app.get('/', async (_req, reply) => reply.redirect('/play/'));
 
   // ───────────── salud ─────────────
-  app.get('/health/live', async () => ({ status: 'ok' }));
+  app.get('/health/live', () => Promise.resolve({ status: 'ok' }));
   app.get('/health/ready', async (_req, reply) => {
     const checks = { db: false, redis: false, accepting: deps.isReady() };
     await Promise.all([

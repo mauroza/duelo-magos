@@ -145,14 +145,14 @@ export class Gateway {
     }
     let json: unknown;
     try {
-      json = JSON.parse(data.toString());
+      json = JSON.parse(rawToString(data));
     } catch {
       this.sendError(conn, undefined, 'VALIDATION_FAILED', 'JSON inválido');
       return;
     }
     const v = (json as { v?: unknown } | null)?.v;
     if (v !== undefined && v !== PROTOCOL_VERSION) {
-      this.sendError(conn, undefined, 'UNSUPPORTED_VERSION', `Versión de protocolo no soportada: ${String(v)}`);
+      this.sendError(conn, undefined, 'UNSUPPORTED_VERSION', `Versión de protocolo no soportada: ${JSON.stringify(v)}`);
       return;
     }
     const parsed = ClientMessage.safeParse(json);
@@ -313,6 +313,11 @@ export class Gateway {
 }
 
 function stripRecipient(event: DomainEvent): Omit<DomainEvent, 'to'> {
-  const { to: _to, ...rest } = event;
-  return rest;
+  return Object.fromEntries(Object.entries(event).filter(([k]) => k !== 'to')) as Omit<DomainEvent, 'to'>;
+}
+
+function rawToString(data: RawData): string {
+  if (Buffer.isBuffer(data)) return data.toString('utf8');
+  if (Array.isArray(data)) return Buffer.concat(data).toString('utf8');
+  return Buffer.from(data).toString('utf8');
 }

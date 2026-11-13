@@ -1,0 +1,31 @@
+# Rollback en menos de 5 minutos: devuelve el 100 % del tráfico a una revisión anterior.
+name: Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      env:
+        description: Ambiente
+        type: choice
+        options: [dev, prod]
+        required: true
+      revision:
+        description: Revisión destino (vacío = la anterior a la actual)
+        required: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.env }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - run: ./scripts/rollback.sh "${{ inputs.env }}" "${{ inputs.revision }}"

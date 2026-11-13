@@ -1,0 +1,109 @@
+# Despliega un ambiente completo desde cero o lo actualiza: infraestructura (Bicep), imagen y Container App.
+name: Desplegar ambiente
+
+on:
+  workflow_call:
+    inputs:
+      env: { required: true, type: string }
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Desplegar ${{ inputs.env }}
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.env }}
+      url: ${{ steps.app.outputs.url }}
+    env:
+      RG: rg-duelo-magos-${{ inputs.env }}
+      LOCATION: ${{ vars.AZURE_LOCATION || 'canadacentral' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Iniciar sesión en Azure (OIDC, sin secretos)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Infraestructura base (Bicep)
+        id: core
+        run: |
+          DEPLOYER_OID=$(az account get-access-token --query accessToken -o tsv | cut -d. -f2 | tr '_-' '/+' | base64 -d 2>/dev/null | jq -r .oid)
+          az deployment group create -g "$RG" -n core-${{ github.run_id }} \
+            -f infra/core.bicep \
+            -p env=${{ inputs.env }} location="$LOCATION" deployerPrincipalId="$DEPLOYER_OID" \
+            --query properties.outputs -o json > core.json
+          for k in acrName acrLoginServer keyVaultName keyVaultUri appIdentityId appIdentityClientId appIdentityPrincipalId \
+                   appIdentityName pgHost redisHost appInsightsId logAnalyticsId caEnvId caEnvDomain; do
+            echo "$k=$(jq -r ".$k.value" core.json)" >> "$GITHUB_OUTPUT"
+          done
+          AI=$(jq -r .appInsightsConnectionString.value core.json)
+          echo "::add-mask::$AI"
+          echo "aiConn=$AI" >> "$GITHUB_OUTPUT"
+
+      - name: Secreto de firma JWT en Key Vault (se crea solo una vez)
+        run: |
+          KV=${{ steps.core.outputs.keyVaultName }}
+          for i in 1 2 3 4 5 6; do
+            if az keyvault secret show --vault-name "$KV" -n jwt-signing-key --query id -o tsv >/dev/null 2>&1; then
+              echo "El secreto ya existe"; exit 0
+            fi
+            az keyvault secret set --vault-name "$KV" -n jwt-signing-key --value "$(openssl rand -base64 48)" -o none && exit 0
+            echo "Esperando a que se propague el rol en Key Vault..."; sleep 20
+          done
+          exit 1
+
+      - name: Construir y publicar imagen
+        id: image
+        run: |
+          az acr login -n ${{ steps.core.outputs.acrName }}
+          IMAGE=${{ steps.core.outputs.acrLoginServer }}/duelo-magos:${{ github.sha }}
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Container App y alertas (nueva revisión)
+        id: app
+        run: |
+          az deployment group create -g "$RG" -n app-${{ github.run_id }} -f infra/app.bicep \
+            -p env=${{ inputs.env }} location="$LOCATION" image="${{ steps.image.outputs.image }}" \
+               revisionSuffix="r${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}" \
+               acrLoginServer=${{ steps.core.outputs.acrLoginServer }} \
+               appIdentityId=${{ steps.core.outputs.appIdentityId }} \
+               appIdentityClientId=${{ steps.core.outputs.appIdentityClientId }} \
+               appIdentityPrincipalId=${{ steps.core.outputs.appIdentityPrincipalId }} \
+               appIdentityName=${{ steps.core.outputs.appIdentityName }} \
+               keyVaultUri=${{ steps.core.outputs.keyVaultUri }} \
+               pgHost=${{ steps.core.outputs.pgHost }} redisHost=${{ steps.core.outputs.redisHost }} \
+               appInsightsConnectionString="${{ steps.core.outputs.aiConn }}" \
+               appInsightsId=${{ steps.core.outputs.appInsightsId }} logAnalyticsId=${{ steps.core.outputs.logAnalyticsId }} \
+               caEnvId=${{ steps.core.outputs.caEnvId }} caEnvDomain=${{ steps.core.outputs.caEnvDomain }} \
+            --query properties.outputs -o json > app.json
+          echo "url=$(jq -r .url.value app.json)" >> "$GITHUB_OUTPUT"
+          echo "revision=$(jq -r .latestRevision.value app.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Prueba de humo (salud + partida completa con bots)
+        run: |
+          URL=${{ steps.app.outputs.url }}
+          for i in $(seq 1 40); do curl -fsS "$URL/health/ready" && break; sleep 10; done
+          curl -fsS "$URL/health/ready"
+          npm ci --no-audit --no-fund
+          npx tsx tools/bot.ts --url "$URL" --games 1 --timeout 180
+
+      - name: Drenar revisiones anteriores (las partidas siguen en la nueva)
+        run: |
+          APP=ca-duelo-${{ inputs.env }}
+          NEW=${{ steps.app.outputs.revision }}
+          # Se conserva la revisión anterior inactiva para poder volver atrás en segundos.
+          for rev in $(az containerapp revision list -n "$APP" -g "$RG" --query "[?properties.active && name!='$NEW'].name" -o tsv); do
+            echo "Desactivando $rev (SIGTERM -> cierre ordenado 4012 -> los clientes reconectan a $NEW)"
+            az containerapp revision deactivate -n "$APP" -g "$RG" --revision "$rev" -o none
+          done
+          echo "### ${{ inputs.env }}: $URL_OUT" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          URL_OUT: ${{ steps.app.outputs.url }}

@@ -224,7 +224,7 @@ export class MatchService {
 
   /** Crea y arranca una partida con jugadores emparejados. Devuelve null si alguno ya estaba en otra. */
   async createMatchmade(players: readonly Player[]): Promise<{ matchId: string; skipped: string[] }> {
-    const [host, ...rest] = players;
+    const [host] = players;
     if (!host) throw new Error('sin jugadores');
     const id = randomUUID();
     const now = this.now();
@@ -270,7 +270,6 @@ export class MatchService {
       );
       await this.insertEvents(tx, id, 1, events);
     });
-    void rest;
     return { matchId: id, skipped };
   }
 
@@ -470,7 +469,7 @@ export class MatchService {
 
   private newInviteCode(): string {
     let code = '';
-    for (let i = 0; i < 6; i++) code += INVITE_ALPHABET[randomInt(INVITE_ALPHABET.length)];
+    for (let i = 0; i < 6; i++) code += INVITE_ALPHABET.charAt(randomInt(INVITE_ALPHABET.length));
     return code;
   }
 

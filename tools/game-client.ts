@@ -116,7 +116,7 @@ export class GameClient {
     this.ws = ws;
     this.closeCode = null;
     ws.on('message', (raw) => {
-      const msg = JSON.parse(raw.toString()) as ServerMsg;
+      const msg = JSON.parse((raw as Buffer).toString('utf8')) as ServerMsg;
       this.onMessage(msg);
     });
     ws.on('close', (code) => {
@@ -142,21 +142,21 @@ export class GameClient {
       this.views.set(p.matchId, p.view);
       this.seqs.set(p.matchId, p.seq);
     } else if (msg.type === 'match.update') {
-      const p = msg.payload as { matchId: string; fromSeq: number; toSeq: number; events: { type: string }[] };
+      const p = msg.payload as { matchId: string; fromSeq: number; toSeq: number; events: Record<string, unknown>[] };
       const last = this.seqs.get(p.matchId) ?? 0;
       if (p.fromSeq > last + 1) {
         // hueco: resincronizar
         this.send('match.subscribe', { matchId: p.matchId });
       } else if (p.toSeq > last) {
         this.seqs.set(p.matchId, p.toSeq);
-        this.applyEvents(p.matchId, p.events as unknown as Record<string, unknown>[]);
+        this.applyEvents(p.matchId, p.events);
       }
     }
     for (const l of this.listeners) l(msg);
   }
 
   /** Mantiene una vista local a partir de los eventos mínimos. */
-  private applyEvents(matchId: string, events: Record<string, unknown>[]): void {
+  private applyEvents(matchId: string, events: readonly Record<string, unknown>[]): void {
     const view = this.views.get(matchId);
     if (!view) return;
     for (const e of events) {

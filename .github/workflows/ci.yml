@@ -1,0 +1,90 @@
+name: CI
+
+# En main corre dentro de deploy.yml (CI -> dev -> prod); aquí cubre pull requests.
+on:
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Lint, tipos, pruebas y contratos
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: duelo
+          POSTGRES_USER: duelo
+          POSTGRES_PASSWORD: duelo-local-dev
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U duelo" --health-interval 2s --health-retries 30
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 2s --health-retries 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - name: Lint (eslint estricto)
+        run: npm run lint
+      - name: Tipos (strict, sin any)
+        run: npm run typecheck
+      - name: Pruebas unitarias
+        run: npm run test:unit
+      - name: Pruebas de integración, concurrencia, seguridad y resiliencia
+        run: npm run test:integration
+      - name: Validar AsyncAPI 3.0
+        run: npx -y @asyncapi/cli@2 validate contracts/asyncapi.yaml
+      - name: Validar OpenAPI 3.1
+        run: npx -y @redocly/cli@1 lint contracts/openapi.yaml --skip-rule=operation-4xx-response --skip-rule=no-server-example.com
+      - name: Compilar
+        run: npm run build
+
+  security:
+    name: Escaneo de dependencias y secretos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - name: Dependencias de producción sin vulnerabilidades altas o críticas
+        run: npm audit --omit=dev --audit-level=high
+      - name: Secretos en el repositorio (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  image:
+    name: Imagen de contenedor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Construir
+        run: docker build -t duelo-magos:ci .
+      - name: Corre como usuario no root
+        run: test "$(docker inspect -f '{{.Config.User}}' duelo-magos:ci)" = "node"
+      - name: Sin vulnerabilidades críticas conocidas (Trivy)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: duelo-magos:ci
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+  bicep:
+    name: Validar infraestructura (Bicep)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: az bicep install
+      - run: az bicep build --file infra/core.bicep --stdout > /dev/null
+      - run: az bicep build --file infra/app.bicep --stdout > /dev/null

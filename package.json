@@ -17,8 +17,6 @@
     "test": "vitest run",
     "test:unit": "vitest run test/unit",
     "test:integration": "vitest run test/integration",
-    "contracts:validate": "tsx tools/validate-contracts.ts",
-    "migrate": "node dist/infra/migrate-cli.js",
     "admin:promote": "tsx tools/promote-admin.ts",
     "bot": "tsx tools/bot.ts",
     "load": "tsx load/loadtest.ts"
