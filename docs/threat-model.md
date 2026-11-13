@@ -28,7 +28,7 @@ Key Vault (red de Azure + identidad administrada) ↔ GitHub Actions (OIDC).
 | 18 | Abuso de administración | E, R | Rol `admin` en el JWT y endpoints con `requireAdmin`; cada acción se guarda en `audit_log` (solo inserción, protegida con trigger) | `security.test.ts` |
 | 19 | Alterar resultados o historial | T, R | Trigger: una partida terminada es inmutable; `match_events` es de solo inserción | migración `001_init.sql` |
 | 20 | Secretos filtrados en el repositorio | I | Ningún secreto en el repo: gitleaks en CI; Key Vault con RBAC; producción rechaza `JWT_SECRET` por variable | CI, `config.ts` |
-| 21 | Credenciales entre servicios | S, I | Identidad administrada para PostgreSQL (solo Entra), Redis (solo Entra), ACR, Key Vault y App Insights (`DisableLocalAuth`) | `infra/*.bicep` |
+| 21 | Credenciales entre servicios | S, I | Identidad administrada para PostgreSQL (solo Entra), ACR, Key Vault y App Insights (`DisableLocalAuth`). Redis: solo red interna (VNet) y contraseña aleatoria de Key Vault entregada con identidad administrada | `infra/*.bicep` |
 | 22 | Credenciales del pipeline | S, E | OIDC federado (sin secretos en GitHub); la identidad de despliegue solo es Owner de los grupos `dev` y `prod` | `bootstrap-azure.sh` |
 | 23 | Dependencias o imagen vulnerables | T | `npm audit` (alta y crítica), CodeQL, Dependabot y Trivy (crítica); la imagen corre como usuario `node`, no root | CI |
 | 24 | Ataques del navegador (XSS, *clickjacking*, *sniffing*) | T, I | Helmet: CSP `default-src 'self'`, HSTS, `nosniff`, `frame-ancestors`; el cliente escapa todo texto de usuarios | `security.test.ts` |

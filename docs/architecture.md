@@ -14,7 +14,7 @@
             identidad      │              │ identidad administrada
            administrada    ▼              ▼
           ┌────────────────────┐   ┌─────────────────────────┐
-          │ PostgreSQL Flexible│   │ Azure Managed Redis     │
+          │ PostgreSQL Flexible│   │ Redis privado (VNet)    │
           │ estado confirmado, │   │ pub/sub entre réplicas, │
           │ bitácora, usuarios │   │ tickets, límites, cola, │
           └────────────────────┘   │ presencia               │
@@ -91,10 +91,21 @@ una revisión nueva que recibe el tráfico, y luego se desactiva la anterior. Es
 WebSockets con el código 4012 y los clientes reconectan a la nueva. Como el estado vive en
 PostgreSQL, las partidas continúan. El rollback es pasar el tráfico a la revisión anterior.
 
-### ADR-7 · Azure Managed Redis en lugar de Azure Cache for Redis
-Azure Cache for Redis está en retiro. Azure Managed Redis (Balanced B0) admite autenticación solo con
-Entra ID (`accessKeysAuthentication: Disabled`). Las claves del emparejamiento usan *hash tags*
-(`{mm}:…`) para que el script atómico funcione con la política de clúster.
+### ADR-7 · Redis privado dentro del entorno de Container Apps
+**Contexto:** el plan original era Azure Managed Redis (Balanced B0) con autenticación solo Entra.
+Al desplegar, Azure respondió `CacheCapacityUnavailable: Balanced_B0 is not currently available in
+Canada Central due to insufficient capacity`. La suscripción de estudiante solo permite 5 regiones;
+mover Redis a otra región (Europa o Chile) agregaría entre 100 y 150 ms por operación, y un SKU
+mayor duplica el costo.
+**Decisión:** Redis 7 corre como una Container App con **ingreso TCP interno**, dentro de una
+**VNet** propia del entorno, sin exposición a Internet. La contraseña la genera el pipeline en Key
+Vault y llega al contenedor como secreto de Container Apps **referenciado a Key Vault y leído con la
+identidad administrada**: nunca aparece en el repositorio ni en la configuración en texto plano.
+**Consecuencias:** costo menor (unos 0,25 vCPU) y sin depender de la capacidad regional. Redis solo
+guarda datos efímeros, así que un reinicio no pierde jugadas: los clientes se resincronizan desde
+PostgreSQL. El código conserva el modo `REDIS_AUTH=entra` para volver a Azure Managed Redis cuando
+haya capacidad. Las claves del emparejamiento usan *hash tags* (`{mm}:…`) para funcionar también
+con Redis en clúster.
 
 ### ADR-8 · Protocolo JSON versionado
 JSON es legible, fácil de depurar y suficiente para el tamaño de los mensajes: 357 B en promedio
