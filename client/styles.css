@@ -81,7 +81,7 @@ button.selected { outline: 2px solid var(--accent2); outline-offset: 2px; }
 .el.agua { background: rgba(76, 195, 255, .15); color: var(--agua); }
 .el.tierra { background: rgba(201, 164, 107, .15); color: var(--tierra); }
 strong.el { padding: 2px 10px; border-radius: 99px; }
-.log { margin: 0; padding-left: 18px; max-height: 260px; overflow: auto; font-size: .9rem; }
+.log { margin: 0; padding-left: 28px; max-height: 260px; overflow: auto; font-size: .9rem; }
 .log li { margin: 4px 0; color: var(--muted); }
 .log li strong { color: var(--text); }
 @media (max-width: 600px) { .gamebar { flex-wrap: wrap; } .elements { grid-template-columns: 1fr; } }

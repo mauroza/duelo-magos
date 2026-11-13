@@ -250,7 +250,8 @@ function renderGame() {
     const el = document.createElement('div');
     const targetable = v.status === 'active' && me?.alive && p.alive && p.id !== me.id && !v.you?.pendingAction;
     el.className = `mage${p.id === me?.id ? ' me' : ''}${p.alive ? '' : ' dead'}${targetable ? ' targetable' : ''}${st.target === p.id ? ' target' : ''}`;
-    const status = v.status === 'lobby' ? (p.ready ? '<span class="badge ok">listo</span>' : '<span class="badge">esperando</span>') : !p.alive ? '<span class="badge">☠</span>' : p.hasActed ? '<span class="badge ok">eligió</span>' : '<span class="badge">pensando…</span>';
+    const winner = v.result?.winners?.includes(p.id);
+    const status = v.status === 'finished' || v.status === 'aborted' ? (winner ? '<span class="badge ok">🏆 ganador</span>' : p.alive ? '' : '<span class="badge">☠</span>') : v.status === 'lobby' ? (p.ready ? '<span class="badge ok">listo</span>' : '<span class="badge">esperando</span>') : !p.alive ? '<span class="badge">☠</span>' : p.hasActed ? '<span class="badge ok">eligió</span>' : '<span class="badge">pensando…</span>';
     const aff = v.affinities?.[p.id] ? ` ${EMOJI[v.affinities[p.id]]}` : '';
     el.innerHTML = `<div class="name"><span>${esc(p.name)}${p.id === me?.id ? ' (tú)' : ''}${aff}${p.connected ? '' : ' ⚡'}</span>${status}</div>
       <div class="bar hp"><div style="width:${(p.hp / 12) * 100}%"></div></div><div class="stat"><span>Vida</span><span>${p.hp}</span></div>
